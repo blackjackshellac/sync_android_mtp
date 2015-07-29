@@ -30,8 +30,8 @@ $log=set_logger(STDERR)
 
 $opts = {
 	:uid=>%x/id -u/.strip,
-	:vendor => "18d1",
-	:product => "",
+	:vendor => ENV["SYNC_MTP_VENDOR"]||"18d1",
+	:product => ENV["SYNC_MTP_PRODUCT"]||"",
 	:src => "",
 	:dst => "/var/tmp/#{ME}",
 	:dryrun => false,
@@ -45,16 +45,20 @@ def getSymbol(string)
 	string.to_sym
 end
 
-def run(cmd, err_msg=nil, opts={:trim=>false})
+def run(cmd, err_msg=nil, opts={:trim=>false,:fail=>true})
 	err_msg="Command failed to run: #{cmd}"
 	out=%x/#{cmd}/
-	$log.die err_msg if $?.exitstatus != 0
+	if $?.exitstatus != 0
+		$log.die err_msg if opts[:fail]
+		return nil
+	end
 	return opts[:trim] ? out.strip! : out
 end
 
 def get_mtp_directory(uid)
 	dev="#{$opts[:vendor]}:#{$opts[:product]}"
-	out=run("lsusb -d #{dev}", "Failed to list usb device #{dev}", :trim=>true)
+	out=run("lsusb -d #{dev}", "Failed to list usb device #{dev}", :trim=>true, :fail=>false)
+	return nil if out.nil?
 
 	$log.die "" if out[/Bus\s(\d+)\s/].nil?
 	usbbus=$1
@@ -65,13 +69,13 @@ def get_mtp_directory(uid)
 	$log.die "Runtime dir not found #{rtdir}" unless File.directory?(rtdir)
 
 	mtp_dir=File.join(rtdir, "gvfs/mtp:host=%5Busb%3A#{usbbus}%2C#{usbdevice}%5D/Internal storage/")
-	$log.die "mtp dir not found #{mtp_dir}" unless File.directory?(mtp_dir)
+	$log.warn "mtp dir not mounted #{mtp_dir}" unless File.directory?(mtp_dir)
 	return mtp_dir
 end
 
 def parse(gopts)
 	begin
-		mtp_dir=get_mtp_directory($opts[:uid])
+		mtp_dir=get_mtp_directory($opts[:uid])||"device not detected"
 		optparser = OptionParser.new { |opts|
 			opts.banner = "#{ME}.rb [options]"
 
@@ -93,6 +97,33 @@ def parse(gopts)
 
 			opts.on('-p', '--progress', "Progress output") {
 				$opts[:progress]=true
+			}
+
+			opts.on('-V', '--vendor VENDOR', String, "Vendor code default=#{$opts[:vendor]}") { |vendor|
+				$opts[:vendor]=vendor
+			}
+
+			opts.on('-P', '--product PRODUCT', String, "Product code default=#{$opts[:product]}") { |product|
+				v,p = product.split(/:/,2)
+				if p.nil?
+					$opts[:product]=product
+				else
+					$opts[:vendor]=v
+					$opts[:product]=p
+				end
+			}
+
+			opts.on('-l', '--list', "List product codes") {
+				# lsusb
+				# Bus 002 Device 037: ID 18d1:4ee1 Google Inc. Nexus 4
+				out=%x/lsusb/.strip
+				puts "ID VEND:PROD Description"
+				out.split(/\r?\n/).each { |line|
+					line.strip!
+					next if line[/^.*?: (.*)$/].nil?
+					puts $1
+				}
+				exit 0
 			}
 
 			opts.on('-v', '--verbose', "Verbose output") {
@@ -248,6 +279,8 @@ begin
 	sync($opts[:src], $opts[:dst])
 rescue Errno::EIO => e
 	$log.die "Quitting on IO error: #{e.message}"
+rescue Errno::ENOENT => e
+	$log.die e.message
 rescue Interrupt => e
 	$log.die "Interrupted"
 end
