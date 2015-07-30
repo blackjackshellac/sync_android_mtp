@@ -203,15 +203,14 @@ def sync_blocks(fsrc, fdst, fsize, length)
 
 		$log.debug "reading #{length} bytes at offset #{offset}: #{fsize} remaining"
 
-		unless $opts[:dryrun]
-			fsrc.seek offset
-			fdst.seek offset
-		end
+		fsrc.seek offset
+		fdst.seek offset
+
+		data=fsrc.read length
+		fdst.write data
+
 		print "=" if $opts[:progress]
-		unless $opts[:dryrun]
-			data=fsrc.read length
-			fdst.write data
-		end
+
 		offset += length
 		fsize  -= length
 		break if fsize <= 0
@@ -227,11 +226,13 @@ def sync_file(dest, fname)
 	size_sync=fsize == dsize
 	return fsize if size_sync
 	puts "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}" if $opts[:verbose]
-	File.open(fname, "rb") { |fsrc|
-		File.open(dname, "wb") { |fdst|
-			sync_blocks(fsrc, fdst, fsize, 1024*1024)
+	unless $opts[:dryrun]
+		File.open(fname, "rb") { |fsrc|
+			File.open(dname, "wb") { |fdst|
+				sync_blocks(fsrc, fdst, fsize, 1024*1024)
+			}
 		}
-	}
+	end
 	return fsize
 end
 
