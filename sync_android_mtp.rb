@@ -23,7 +23,7 @@
 #	elif [ -d "$PtpPath" ]; then
 #		echo "$PtpPath"
 #	else
-#		echo "Error: File or directory was not found." 
+#		echo "Error: File or directory was not found."
 #	fi
 #}
 #
@@ -80,12 +80,12 @@ $opts = {
 	:vendor => ENV["SYNC_MTP_VENDOR"]||"18d1",
 	:product => ENV["SYNC_MTP_PRODUCT"]||"",
 	:src => "",
-	:dst => DST,
+	:dst => ENV["SYNC_MTP_BACKUP"]||DST,
 	:dryrun => false,
 	:verbose => false,
 	:progress => false,
 	:from => true,
-	:log => nil 
+	:log => nil
 }
 
 def getSymbol(string)
@@ -125,13 +125,13 @@ def parse(gopts)
 	begin
 		mtp_dir=get_mtp_directory($opts[:uid])||"device not detected"
 		optparser = OptionParser.new { |opts|
-			opts.banner = "#{ME}.rb [options]"
+			opts.banner = "#{ME}.rb [options]\n"
 
 			opts.on('-b', '--backup DIR', String, "Backup directory, default #{$opts[:dst]}") { |dst|
 				$opts[:dst]=dst
 			}
 
-			opts.on('-f', '--from', "From mtp directory to backup: #{mtp_dir}") {
+			opts.on('-f', '--from', "From mtp directory to backup (default): #{mtp_dir}") {
 				$opts[:from]=true
 			}
 
@@ -174,9 +174,9 @@ def parse(gopts)
 				exit 0
 			}
 
-			opts.on('-L', '--log [FILE]', String, "Log to file, default #{$opts[:log]}") { |file|
+			opts.on('-L', '--log [FILE]', String, "Log to file instead of stdout, default #{$opts[:log]}") { |file|
 				$opts[:log]=file||LOG
-				$log.debug "Log file=#{$opts[:log].inspect}"
+				$log.info "Logging to #{$opts[:log].inspect}"
 			}
 
 			opts.on('-v', '--verbose', "Verbose output") {
@@ -188,7 +188,12 @@ def parse(gopts)
 			}
 
 			opts.on('-h', '--help', "Help") {
+				$stdout.puts ""
 				$stdout.puts opts
+				$stdout.puts "\nEnvironment variables:\n"
+				$stdout.puts "\tSYNC_MTP_VENDOR  - usb vendor code\n"
+				$stdout.puts "\tSYNC_MTP_PRODUCT - usb product code\n"
+				$stdout.puts "\tSYNC_MTP_BACKUP  - default backup directory\n"
 				exit 0
 			}
 		}
@@ -207,7 +212,9 @@ def parse(gopts)
 		unless $opts[:log].nil?
 			$log.debug "Logging file #{$opts[:log]}"
 			FileUtils.mkdir_p(File.dirname($opts[:log]))
+			# open log to $stdout
 			$stdout=File.open($opts[:log], "a")
+			# create a logger pointing to stdout
 			$log=set_logger($stdout, $log.level)
 			$stdout=$log
 		end
@@ -242,7 +249,7 @@ def sync_blocks(fsrc, fdst, fsize, length)
 		fsize  -= length
 		break if fsize <= 0
 	end
-	$stdout.puts if $opts[:progress]
+	$stdout.puts "" if $opts[:progress]
 end
 
 def sync_file(dest, fname)
@@ -251,15 +258,15 @@ def sync_file(dest, fname)
 	dsize=-1
 	dsize=File.lstat(dname).size if File.exists?(dname)
 	size_sync=fsize == dsize
+	# size is the same, assume files are synced
 	return fsize if size_sync
 	$stdout.puts "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}" if $opts[:verbose]
-	unless $opts[:dryrun]
-		File.open(fname, "rb") { |fsrc|
-			File.open(dname, "wb") { |fdst|
-				sync_blocks(fsrc, fdst, fsize, 1024*1024)
-			}
+	return fsize if $opts[:dryrun]
+	File.open(fname, "rb") { |fsrc|
+		File.open(dname, "wb") { |fdst|
+			sync_blocks(fsrc, fdst, fsize, 1024*1024)
 		}
-	end
+	}
 	return fsize
 end
 
@@ -272,8 +279,6 @@ def sync_dir(dest, dname)
 
 	FileUtils.mkdir_p(ddir)
 end
-
-FileUtils.mkdir_p($opts[:dst])
 
 def sync(sdir, ddir)
 	total=0
@@ -305,6 +310,7 @@ def sync(sdir, ddir)
 end
 
 begin
+	FileUtils.mkdir_p($opts[:dst])
 	sync($opts[:src], $opts[:dst])
 rescue Errno::EIO => e
 	$log.die "Quitting on IO error: #{e.message}"
@@ -312,4 +318,9 @@ rescue Errno::ENOENT => e
 	$log.die e.message
 rescue Interrupt => e
 	$log.die "Interrupted"
+rescue => e
+	e.backtrace.each { |tr|
+		puts tr
+	}
+	$log.die e.message
 end
