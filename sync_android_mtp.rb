@@ -85,7 +85,8 @@ $opts = {
 	:verbose => false,
 	:progress => false,
 	:from => true,
-	:log => nil
+	:log => nil,
+	:delete_skipped_to => false
 }
 
 def getSymbol(string)
@@ -137,6 +138,10 @@ def parse(gopts)
 
 			opts.on('-t', '--to', "To the mtp directory from backup: #{mtp_dir}") {
 				$opts[:from]=false
+			}
+
+			opts.on('-d', '--delete-skip-to', "Delete destination files when copy from src is skipped (only for --from, not --to)") {
+				$opts[:delete_skipped_to]=true
 			}
 
 			opts.on('-n', '--dry-run', "Dry run") {
@@ -205,6 +210,9 @@ def parse(gopts)
 			$opts[:src]=src
 			$opts[:dst]=dst
 		else
+			$log.error "Resetting --delete_skipped_to=false"
+			$opts[:delete_skipped_to]=false
+
 			$opts[:src]=dst
 			$opts[:dst]=src
 		end
@@ -252,6 +260,15 @@ def sync_blocks(fsrc, fdst, fsize, length)
 	$stdout.puts "" if $opts[:progress]
 end
 
+def sync_delete(dest, fname)
+	dname=File.join(dest, fname)
+	found=File.exist?(dname)
+	if found
+		$stdout.puts "Deleting destination #{dname}"
+		FileUtils.rm_f(dname) unless $opts[:dryrun]
+	end
+end
+
 def sync_file(dest, fname)
 	fsize=File.lstat(fname).size
 	dname=File.join(dest, fname)
@@ -262,12 +279,17 @@ def sync_file(dest, fname)
 	return fsize if size_sync
 	$stdout.puts "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}" if $opts[:verbose]
 	return fsize if $opts[:dryrun]
-	File.open(fname, "rb") { |fsrc|
-		File.open(dname, "wb") { |fdst|
-			sync_blocks(fsrc, fdst, fsize, 1024*1024)
+	begin
+		File.open(fname, "rb") { |fsrc|
+			File.open(dname, "wb") { |fdst|
+				sync_blocks(fsrc, fdst, fsize, 1024*1024)
+			}
 		}
-	}
-	return fsize
+		return fsize
+	rescue Errno::EIO => e
+		$log.error "Failed to sync #{fname} to #{dname}"
+	end
+	return 0
 end
 
 def sync_dir(dest, dname)
@@ -280,7 +302,19 @@ def sync_dir(dest, dname)
 	FileUtils.mkdir_p(ddir)
 end
 
+RE_ANDROID_DATA_CACHE=/^Android\/data\/.*?\/cache\//i
+def skip_path(path)
+	# /^Android\/data\/.*\/cache\//i
+	m=RE_ANDROID_DATA_CACHE.match(path)
+	unless m.nil?
+		$stdout.puts "Skipping cache path #{path}" if $opts[:verbose]
+		return true
+	end
+	false
+end
+
 def sync(sdir, ddir)
+	skip = false
 	total=0
 	files=0
 	dirs=0
@@ -292,10 +326,16 @@ def sync(sdir, ddir)
 			# strip off ./
 			e=e[2..-1]
 			next if e.nil?
+			skip=skip_path(e)
 			if File.directory?(e)
+				next if skip
 				dirs+=1
 				sync_dir(ddir, e)
 			elsif File.file?(e)
+				if skip
+					sync_delete(ddir, e) if $opts[:from] && $opts[:delete_skipped_to]
+					next
+				end
 				files+=1
 				total+=sync_file(ddir, e)
 			else
