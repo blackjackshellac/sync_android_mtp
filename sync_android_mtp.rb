@@ -39,6 +39,7 @@ require 'optparse'
 require 'logger'
 require 'find'
 require 'fileutils'
+require 'readline'
 
 ME=File.basename($0, ".rb")
 MD=File.dirname(File.expand_path($0))
@@ -81,13 +82,20 @@ $opts = {
 	:product => ENV["SYNC_MTP_PRODUCT"]||"",
 	:src => "",
 	:dst => ENV["SYNC_MTP_BACKUP"]||DST,
+	:dirs => [],
 	:dryrun => false,
 	:verbose => false,
 	:progress => false,
 	:from => true,
+	:sync => false,
+	:yes => false,
 	:log => nil,
 	:delete_skipped_to => false
 }
+
+def vputs(msg, force=false)
+	$stdout.puts msg if force || $opts[:verbose]
+end
 
 def getSymbol(string)
 	string=string[1..-1] if string[0].eql?(":")
@@ -117,9 +125,20 @@ def get_mtp_directory(uid)
 	rtdir="/run/user/#{uid}/"
 	$log.die "Runtime dir not found #{rtdir}" unless File.directory?(rtdir)
 
-	mtp_dir=File.join(rtdir, "gvfs/mtp:host=%5Busb%3A#{usbbus}%2C#{usbdevice}%5D/Internal storage/")
+	mtp_dir=File.join(rtdir, "gvfs/mtp:host=%5Busb%3A#{usbbus}%2C#{usbdevice}%5D/")
 	$log.warn "mtp dir not mounted #{mtp_dir}" unless File.directory?(mtp_dir)
 	return mtp_dir
+end
+
+def get_dirs(src)
+	dirs=[]
+	FileUtils.chdir(src) {
+		Dir.glob('*') { |dir|
+			next unless File.directory?(dir)
+			dirs << dir
+		}
+	}
+	dirs
 end
 
 def parse(gopts)
@@ -138,6 +157,15 @@ def parse(gopts)
 
 			opts.on('-t', '--to', "To the mtp directory from backup: #{mtp_dir}") {
 				$opts[:from]=false
+			}
+
+			opts.on('-s', '--sync', "Sync from android to backup then purge old files from backup") {
+				$opts[:sync]=true
+				$opts[:delete_skipped_to]=true
+			}
+
+			opts.on('-y', '--yes', "Answer yes to prompts") {
+				$opts[:yes]=true
 			}
 
 			opts.on('-d', '--delete-skip-to', "Delete destination files when copy from src is skipped (only for --from, not --to)") {
@@ -204,18 +232,26 @@ def parse(gopts)
 		}
 		optparser.parse!
 
+		if $opts[:sync]
+			$log.die "Cannot use --to with --sync" unless $opts[:from]
+			$opts[:from]=true
+			$opts[:record]=true
+			$opts[:delete_skipped_to]=true
+		end
 		src=get_mtp_directory($opts[:uid])
 		dst=$opts[:dst]
 		if $opts[:from]
 			$opts[:src]=src
 			$opts[:dst]=dst
 		else
-			$log.error "Resetting --delete_skipped_to=false"
+			$log.error "Resetting --delete_skipped_to=false" if $opts[:delete_skipped_to]
 			$opts[:delete_skipped_to]=false
 
 			$opts[:src]=dst
 			$opts[:dst]=src
 		end
+
+		$opts[:dirs]=get_dirs(src)
 
 		unless $opts[:log].nil?
 			$log.debug "Logging file #{$opts[:log]}"
@@ -260,12 +296,25 @@ def sync_blocks(fsrc, fdst, fsize, length)
 	$stdout.puts "" if $opts[:progress]
 end
 
+def ask_yes_no_all(prompt)
+	prompt+= " [y/N/all] $ "
+	return true if $opts[:yes]
+	line=Readline.readline(prompt).strip
+	unless line[/all/i].nil?
+		$opts[:yes]=true
+		return true
+	end
+	return line[/(y|yes)/i].nil? ? false : true
+end
+
 def sync_delete(dest, fname)
 	dname=File.join(dest, fname)
 	found=File.exist?(dname)
-	if found
-		$stdout.puts "Deleting destination #{dname}"
-		FileUtils.rm_f(dname) unless $opts[:dryrun]
+	return unless found
+	if ask_yes_no_all("Delete #{dname}")
+		$log.debug "Deleting destination #{dname}"
+		opts={ :verbose => $opts[:verbose] }
+		FileUtils.rm_f(dname, opts) unless $opts[:dryrun]
 	end
 end
 
@@ -277,7 +326,7 @@ def sync_file(dest, fname)
 	size_sync=fsize == dsize
 	# size is the same, assume files are synced
 	return fsize if size_sync
-	$stdout.puts "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}" if $opts[:verbose]
+	vputs "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}"
 	return fsize if $opts[:dryrun]
 	begin
 		File.open(fname, "rb") { |fsrc|
@@ -295,33 +344,37 @@ end
 def sync_dir(dest, dname)
 	toplevel=dname.chomp("/").scan(/\//).length == 0
 	ddir=File.join(dest, dname)
-	$stdout.puts "Syncing directory #{ddir}" if toplevel && $opts[:verbose]
+	$log.info "Syncing to #{ddir}" if toplevel && $opts[:verbose]
 	return if File.directory?(ddir)
-	$stdout.puts "Creating directory #{ddir}" unless toplevel || !$opts[:verbose]
-
+	$log.info "Creating directory #{ddir}" unless toplevel || !$opts[:verbose]
 	FileUtils.mkdir_p(ddir)
 end
 
 RE_ANDROID_DATA_CACHE=/^Android\/data\/.*?\/cache\//i
+RE_THUMBNAILS=/(^|\/).thumbnails\//i
+RE_SKIP_ARRAY = [ RE_ANDROID_DATA_CACHE, RE_THUMBNAILS ]
 def skip_path(path)
+	skip=false
 	# /^Android\/data\/.*\/cache\//i
-	m=RE_ANDROID_DATA_CACHE.match(path)
-	unless m.nil?
-		$stdout.puts "Skipping cache path #{path}" if $opts[:verbose]
-		return true
-	end
-	false
+	RE_SKIP_ARRAY.each { |re|
+		m=re.match(path)
+		next if m.nil?
+		$log.debug "Skipping path #{path}: #{re.to_s}" if $opts[:verbose]
+		skip=true
+		break
+	}
+	return skip
 end
 
-def sync(sdir, ddir)
+def sync(sdir, ddir, record=nil)
 	skip = false
 	total=0
 	files=0
 	dirs=0
 	tstart=Time.new.to_i
 	FileUtils.chdir(sdir) {
-		$stdout.puts "Source dir = #{sdir}" if $opts[:verbose]
-		$stdout.puts "Backup dir = #{ddir}" if $opts[:verbose]
+		vputs "Source dir = #{sdir}"
+		vputs "Backup dir = #{ddir}"
 		Find.find(".") { |e|
 			# strip off ./
 			e=e[2..-1]
@@ -333,11 +386,12 @@ def sync(sdir, ddir)
 				sync_dir(ddir, e)
 			elsif File.file?(e)
 				if skip
-					sync_delete(ddir, e) if $opts[:from] && $opts[:delete_skipped_to]
+					sync_delete(ddir, e) if $opts[:delete_skipped_to]
 					next
 				end
 				files+=1
 				total+=sync_file(ddir, e)
+				record[e]=true unless record.nil?
 			else
 				$log.warn "Skipping file #{e}: #{File.lstat(e).inspect}"
 			end
@@ -346,12 +400,45 @@ def sync(sdir, ddir)
 	tend=Time.new.to_i-tstart
 	tend+=1 if tend==0
 	mb=total/1024/1024
-	$stdout.puts "Synced #{files} files and #{dirs} dirs: #{mb} MB in #{tend} secs - #{mb/tend} MB/s"
+	vputs("Synced #{files} files and #{dirs} dirs: #{mb} MB in #{tend} secs - #{mb/tend} MB/s", true)
+end
+
+def sync_toplevel(toplevel)
+	src=File.join($opts[:src], toplevel)
+	dst=File.join($opts[:dst], toplevel)
+
+	$log.info "Backup #{src} to #{dst}"
+
+	record = $opts[:sync] ? {} : nil
+	FileUtils.mkdir_p(dst)
+	sync(src, dst, record)
+	if $opts[:sync]
+		$log.info "Recorded #{record.size} files in sync from"
+		# delete files in dst that were not recorded during first sync
+		FileUtils.chdir(dst) {
+			vputs "Working dir = #{dst}"
+			Find.find(".") { |e|
+				# strip off ./
+				e=e[2..-1]
+				next if e.nil?
+				next unless File.file?(e)
+				next if record.key?(e)
+				vputs("Found file not recorded in src: #{e}",true)
+				sync_delete(dst, e)
+			}
+		}
+		src,dst=dst,src
+		$opts[:delete_skipped_to]=false
+		$opts[:from]=false
+		#sync(src, dst)
+	end
 end
 
 begin
-	FileUtils.mkdir_p($opts[:dst])
-	sync($opts[:src], $opts[:dst])
+	$log.die "No dirs found in #{$opts[:src]}" if $opts[:dirs].empty?
+	$opts[:dirs].each { |toplevel|
+		sync_toplevel(toplevel)
+	}
 rescue Errno::EIO => e
 	$log.die "Quitting on IO error: #{e.message}"
 rescue Errno::ENOENT => e
@@ -364,3 +451,4 @@ rescue => e
 	}
 	$log.die e.message
 end
+
