@@ -223,10 +223,15 @@ def parse(gopts)
 			opts.on('-h', '--help', "Help") {
 				$stdout.puts ""
 				$stdout.puts opts
-				$stdout.puts "\nEnvironment variables:\n"
-				$stdout.puts "\tSYNC_MTP_VENDOR  - usb vendor code\n"
-				$stdout.puts "\tSYNC_MTP_PRODUCT - usb product code\n"
-				$stdout.puts "\tSYNC_MTP_BACKUP  - default backup directory\n"
+				$stdout.puts <<HELP
+
+Environment variables:
+
+\tSYNC_MTP_VENDOR  - usb vendor code (#{ENV['SYNC_MTP_VENDOR']||"not set"})
+\tSYNC_MTP_PRODUCT - usb product code (#{ENV['SYNC_MTP_PRODUCT']||"not set"})
+\tSYNC_MTP_BACKUP  - default backup directory (#{ENV['SYNC_MTP_BACKUP']||"not set"})
+
+HELP
 				exit 0
 			}
 		}
