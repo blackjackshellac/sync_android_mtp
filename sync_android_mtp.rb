@@ -40,6 +40,7 @@ require 'logger'
 require 'find'
 require 'fileutils'
 require 'readline'
+require 'json'
 
 ME=File.basename($0, ".rb")
 MD=File.dirname(File.expand_path($0))
@@ -47,6 +48,7 @@ MD=File.dirname(File.expand_path($0))
 TMP="/var/tmp/#{ME}/#{ENV['USER']}"
 DST="#{TMP}/backup"
 LOG="#{TMP}/#{ME}.log"
+CFG=File.join(MD, ME+".json")
 
 class Logger
 	def die(msg)
@@ -92,6 +94,24 @@ $opts = {
 	:log => nil,
 	:delete_skipped_to => false
 }
+
+def readConfig
+	begin
+		return File.read(CFG)
+	rescue => e
+		$log.error "reading json config: #{CFG} [#{e.message}]"
+		return nil
+	end
+end
+
+def parseConfig(json)
+	return { :configs =>[] } if json.nil?
+	begin
+		return JSON.parse(json, :symbolize_names=>true)
+	rescue => e
+		$log.die "Failed to parse json config: #{CFG} [#{e.message}]"
+	end
+end
 
 def vputs(msg, force=false)
 	$stdout.puts msg if force || $opts[:verbose]
@@ -141,11 +161,24 @@ def get_dirs(src)
 	dirs
 end
 
-def parse(gopts)
+def parse(gopts, jcfg)
 	begin
+		config_names=jcfg[:configs].keys
 		mtp_dir=get_mtp_directory($opts[:uid])||"device not detected"
 		optparser = OptionParser.new { |opts|
 			opts.banner = "#{ME}.rb [options]\n"
+
+			opts.on('-c', '--config NAME', String, "Config name, one of [#{config_names.join(',')}]") { |name|
+				name=name.to_sym
+				config=jcfg[:configs][name]
+				$log.die "Unknown config name #{name}" if config.nil?
+				$log.info "Setting config values for #{name}"
+				config.keys.each { |key|
+					$log.die "Unknown config value #{key}" unless $opts.key?(key)
+					$log.info "$opts[#{key}]=#{config[key]}"
+					$opts[key]=config[key]
+				}
+			}
 
 			opts.on('-b', '--backup DIR', String, "Backup directory, default #{$opts[:dst]}") { |dst|
 				$opts[:dst]=dst
@@ -277,7 +310,8 @@ HELP
 	gopts
 end
 
-$opts=parse($opts)
+$cfg = parseConfig(readConfig())
+$opts=parse($opts, $cfg)
 
 def sync_blocks(fsrc, fdst, fsize, length)
 	offset=0
@@ -340,8 +374,8 @@ def sync_file(dest, fname)
 			}
 		}
 		return fsize
-	rescue Errno::EIO => e
-		$log.error "Failed to sync #{fname} to #{dname}"
+	rescue => e
+		$log.error "Failed to sync #{fname} to #{dname}: #{e.message}"
 	end
 	return 0
 end
