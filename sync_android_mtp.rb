@@ -133,7 +133,9 @@ def run(cmd, err_msg=nil, opts={:trim=>false,:fail=>true})
 end
 
 def get_mtp_directory(uid)
-	dev="#{$opts[:vendor]}:#{$opts[:product]}"
+	dev="#{$opts[:vendor]}"
+	dev+=":#{$opts[:product]}" unless $opts[:product].empty?
+	$log.info "lsusb -d #{dev}"
 	out=run("lsusb -d #{dev}", "Failed to list usb device #{dev}", :trim=>true, :fail=>false)
 	return nil if out.nil?
 
@@ -147,10 +149,14 @@ def get_mtp_directory(uid)
 
 	mtp_dir=File.join(rtdir, "gvfs/mtp:host=%5Busb%3A#{usbbus}%2C#{usbdevice}%5D/")
 	$log.warn "mtp dir not mounted #{mtp_dir}" unless File.directory?(mtp_dir)
+
+	$log.info "mtp_dir="+mtp_dir
+
 	return mtp_dir
 end
 
 def get_dirs(src)
+	$log.info "Getting dirs in #{src}"
 	dirs=[]
 	FileUtils.chdir(src) {
 		Dir.glob('*') { |dir|
@@ -158,6 +164,7 @@ def get_dirs(src)
 			dirs << dir
 		}
 	}
+	$log.info "Dirs="+dirs.join(", ")
 	dirs
 end
 
@@ -277,19 +284,24 @@ HELP
 			$opts[:delete_skipped_to]=true
 		end
 		src=get_mtp_directory($opts[:uid])
+
+		$log.die "src directory not found for uid=#{$opts[:uid]}: #{$opts.to_json}" if src.nil?
+
 		dst=$opts[:dst]
 		if $opts[:from]
 			$opts[:src]=src
 			$opts[:dst]=dst
-		else
+		else # --to aka !$opts[:from]
 			$log.error "Resetting --delete_skipped_to=false" if $opts[:delete_skipped_to]
 			$opts[:delete_skipped_to]=false
 
 			$opts[:src]=dst
 			$opts[:dst]=src
+
+			$log.info "src=#{$opts[:src]} dst=#{$opts[:dst]} src=#{src} dst=#{dst}"
 		end
 
-		$opts[:dirs]=get_dirs(src)
+		$opts[:dirs]=get_dirs($opts[:src])
 
 		unless $opts[:log].nil?
 			$log.debug "Logging file #{$opts[:log]}"
@@ -302,9 +314,12 @@ HELP
 		end
 
 	rescue OptionParser::InvalidOption => e
-		$log.die e.message
+		$log.die "Invalid option: "+e.message
 	rescue => e
-		$log.die e.message
+		e.backtrace.each { |tr|
+			puts tr
+		}
+		$log.die "Exception: "+e.message
 	end
 
 	gopts
@@ -443,6 +458,10 @@ def sync(sdir, ddir, record=nil)
 end
 
 def sync_toplevel(toplevel)
+	$log.info "toplevel="+toplevel
+	$log.info "src="+$opts[:src]
+	$log.info "dst="+$opts[:dst]
+	
 	src=File.join($opts[:src], toplevel)
 	dst=File.join($opts[:dst], toplevel)
 
@@ -481,13 +500,13 @@ begin
 rescue Errno::EIO => e
 	$log.die "Quitting on IO error: #{e.message}"
 rescue Errno::ENOENT => e
-	$log.die e.message
+	$log.die "Not found: "+e.message
 rescue Interrupt => e
 	$log.die "Interrupted"
 rescue => e
 	e.backtrace.each { |tr|
 		puts tr
 	}
-	$log.die e.message
+	$log.die "Exception: " + e.message
 end
 

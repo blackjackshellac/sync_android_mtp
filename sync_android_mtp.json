@@ -1,11 +1,15 @@
 {
 	"configs": {
 		"lissa": {
-			"vendor": "04e8:6860",
-			"dst": "/home/tmp/lissa/galaxy_sii/backup/"
+			"vendor": "18d1:4ee1",
+			"dst": "/home/tmp/lissa/nexus_5/backup/"
 		},
 		"steeve": {
 			"vendor": "18d1:4ee1",
+			"dst": "/home/tmp/steeve/nexus_5/backup/"
+		},
+		"steeve_debug": {
+			"vendor": "18d1:4ee2",
 			"dst": "/home/tmp/steeve/nexus_5/backup/"
 		}
 	}
