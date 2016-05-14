@@ -11,6 +11,10 @@
 		"steeve_debug": {
 			"vendor": "18d1:4ee2",
 			"dst": "/home/tmp/steeve/nexus_5/backup/"
+		},
+		"nexus_7": {
+			"vendor": "18d1:4e42",
+			"dst": "/home/tmp/steeve/nexus_7/backup/"
 		}
 	}
 }
