@@ -41,6 +41,9 @@ require 'find'
 require 'fileutils'
 require 'readline'
 require 'json'
+require 'etc'
+
+require_relative 'lib/runner'
 
 ME=File.basename($0, ".rb")
 MD=File.dirname(File.expand_path($0))
@@ -86,6 +89,8 @@ $opts = {
 	:dst => ENV["SYNC_MTP_BACKUP"]||DST,
 	:dirs => [],
 	:dryrun => false,
+	:scripts => [],
+	:run_scripts => false,
 	:verbose => false,
 	:progress => false,
 	:from => true,
@@ -181,56 +186,68 @@ def parse(gopts, jcfg)
 				$log.die "Unknown config name #{name}" if config.nil?
 				$log.info "Setting config values for #{name}"
 				config.keys.each { |key|
-					$log.die "Unknown config value #{key}" unless $opts.key?(key)
-					$log.info "$opts[#{key}]=#{config[key]}"
-					$opts[key]=config[key]
+					if key.eql?(:scripts)
+						# $opts[scripts]={:woot=>["rsync -av DCIM/ /data/photos/steeve/nexus_5/DCIM/"]}
+						# look for scripts for this host
+						hostname=%x(hostname -s).strip
+						user_hostname="#{Etc.getlogin}@#{hostname}".to_sym
+						$log.debug "user@host=#{user_hostname} config=#{config[key].inspect}"
+						if config[key].key?(user_hostname)
+							$log.debug config[key][user_hostname].inspect
+							gopts[:scripts]=config[key][user_hostname]
+						end
+					else
+						$log.die "Unknown config value #{key}" unless gopts.key?(key)
+						gopts[key]=config[key]
+					end
+					$log.info "gopts[#{key}]=#{config[key]}"
 				}
 			}
 
-			opts.on('-b', '--backup DIR', String, "Backup directory, default #{$opts[:dst]}") { |dst|
-				$opts[:dst]=dst
+			opts.on('-b', '--backup DIR', String, "Backup directory, default #{gopts[:dst]}") { |dst|
+				gopts[:dst]=dst
 			}
 
 			opts.on('-f', '--from', "From mtp directory to backup (default): #{mtp_dir}") {
-				$opts[:from]=true
+				gopts[:from]=true
 			}
 
 			opts.on('-t', '--to', "To the mtp directory from backup: #{mtp_dir}") {
-				$opts[:from]=false
+				gopts[:from]=false
 			}
 
 			opts.on('-s', '--sync', "Sync from android to backup then purge old files from backup") {
-				$opts[:sync]=true
-				$opts[:delete_skipped_to]=true
+				gopts[:sync]=true
+				gopts[:delete_skipped_to]=true
 			}
 
 			opts.on('-y', '--yes', "Answer yes to prompts") {
-				$opts[:yes]=true
+				gopts[:yes]=true
 			}
 
 			opts.on('-d', '--delete-skip-to', "Delete destination files when copy from src is skipped (only for --from, not --to)") {
-				$opts[:delete_skipped_to]=true
+				gopts[:delete_skipped_to]=true
 			}
 
 			opts.on('-n', '--dry-run', "Dry run") {
-				$opts[:dryrun]=true
+				gopts[:dryrun]=true
 			}
 
 			opts.on('-p', '--progress', "Progress output") {
-				$opts[:progress]=true
+				gopts[:progress]=true
 			}
 
-			opts.on('-V', '--vendor VENDOR', String, "Vendor code default=#{$opts[:vendor]}") { |vendor|
-				$opts[:vendor]=vendor
+			opts.on('-V', '--vendor VENDOR', String, "Vendor code default=#{gopts[:vendor]}") { |vendor|
+				gopts[:vendor]=vendor
 			}
 
-			opts.on('-P', '--product PRODUCT', String, "Product code default=#{$opts[:product]}") { |product|
+			opts.on('-P', '--product PRODUCT', String, "Product code default=#{gopts[:product]}") { |product|
 				v,p = product.split(/:/,2)
 				if p.nil?
-					$opts[:product]=product
+					gopts[:product]=product
 				else
-					$opts[:vendor]=v
-					$opts[:product]=p
+					gopts[:vendor]=v
+					gopts[:product]=p
 				end
 			}
 
@@ -247,13 +264,17 @@ def parse(gopts, jcfg)
 				exit 0
 			}
 
-			opts.on('-L', '--log [FILE]', String, "Log to file instead of stdout, default #{$opts[:log]}") { |file|
-				$opts[:log]=file||LOG
-				$log.info "Logging to #{$opts[:log].inspect}"
+			opts.on('-L', '--log [FILE]', String, "Log to file instead of stdout, default #{gopts[:log]}") { |file|
+				gopts[:log]=file||LOG
+				$log.info "Logging to #{gopts[:log].inspect}"
+			}
+
+			opts.on('-R', '--run-scripts', "Run config scripts after transferring data") {
+				gopts[:run_scripts]=true
 			}
 
 			opts.on('-v', '--verbose', "Verbose output") {
-				$opts[:verbose]=true
+				gopts[:verbose]=true
 			}
 
 			opts.on('-D', '--debug', "Turn on debugging output") {
@@ -277,41 +298,43 @@ HELP
 		}
 		optparser.parse!
 
-		if $opts[:sync]
-			$log.die "Cannot use --to with --sync" unless $opts[:from]
-			$opts[:from]=true
-			$opts[:record]=true
-			$opts[:delete_skipped_to]=true
+		if gopts[:sync]
+			$log.die "Cannot use --to with --sync" unless gopts[:from]
+			gopts[:from]=true
+			gopts[:record]=true
+			gopts[:delete_skipped_to]=true
 		end
-		src=get_mtp_directory($opts[:uid])
+		src=get_mtp_directory(gopts[:uid])
 
-		$log.die "src directory not found for uid=#{$opts[:uid]}: #{$opts.to_json}" if src.nil?
+		$log.die "src directory not found for uid=#{gopts[:uid]}: #{gopts.to_json}" if src.nil?
 
-		dst=$opts[:dst]
-		if $opts[:from]
-			$opts[:src]=src
-			$opts[:dst]=dst
-		else # --to aka !$opts[:from]
-			$log.error "Resetting --delete_skipped_to=false" if $opts[:delete_skipped_to]
-			$opts[:delete_skipped_to]=false
+		dst=gopts[:dst]
+		if gopts[:from]
+			gopts[:src]=src
+			gopts[:dst]=dst
+		else # --to aka !gopts[:from]
+			$log.error "Resetting --delete_skipped_to=false" if gopts[:delete_skipped_to]
+			gopts[:delete_skipped_to]=false
 
-			$opts[:src]=dst
-			$opts[:dst]=src
+			gopts[:src]=dst
+			gopts[:dst]=src
 
-			$log.info "src=#{$opts[:src]} dst=#{$opts[:dst]} src=#{src} dst=#{dst}"
+			$log.info "src=#{gopts[:src]} dst=#{gopts[:dst]} src=#{src} dst=#{dst}"
 		end
 
-		$opts[:dirs]=get_dirs($opts[:src])
+		gopts[:dirs]=get_dirs(gopts[:src])
 
-		unless $opts[:log].nil?
-			$log.debug "Logging file #{$opts[:log]}"
-			FileUtils.mkdir_p(File.dirname($opts[:log]))
+		unless gopts[:log].nil?
+			$log.debug "Logging file #{gopts[:log]}"
+			FileUtils.mkdir_p(File.dirname(gopts[:log]))
 			# open log to $stdout
-			$stdout=File.open($opts[:log], "a")
+			$stdout=File.open(gopts[:log], "a")
 			# create a logger pointing to stdout
 			$log=set_logger($stdout, $log.level)
 			$stdout=$log
 		end
+
+		vputs "gopts=#{gopts.inspect}"
 
 	rescue OptionParser::InvalidOption => e
 		$log.die "Invalid option: "+e.message
@@ -399,7 +422,7 @@ def sync_dir(dest, dname)
 	toplevel=dname.chomp("/").scan(/\//).length == 0
 	ddir=File.join(dest, dname)
 	$log.info "Syncing to #{ddir}" if toplevel && $opts[:verbose]
-	return if File.directory?(ddir)
+	return if File.directory?(ddir) || $opts[:dryrun]
 	$log.info "Creating directory #{ddir}" unless toplevel || !$opts[:verbose]
 	FileUtils.mkdir_p(ddir)
 end
@@ -443,13 +466,18 @@ def sync(sdir, ddir, record=nil)
 					sync_delete(ddir, e) if $opts[:delete_skipped_to]
 					next
 				end
-				files+=1
-				total+=sync_file(ddir, e)
+				files += 1
+				total += sync_file(ddir, e)
 				record[e]=true unless record.nil?
 			else
 				$log.warn "Skipping file #{e}: #{File.lstat(e).inspect}"
 			end
-		}
+		} unless $opts[:dryrun]
+		if $opts[:run_scripts]
+			$opts[:scripts].each { |script|
+				Runner.run(script, $opts[:dryrun])
+			}
+		end
 	}
 	tend=Time.new.to_i-tstart
 	tend+=1 if tend==0
