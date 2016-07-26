@@ -8,14 +8,14 @@
 			"vendor": "18d1:4ee1",
 			"dst": "/home/tmp/steeve/nexus_5/backup/",
 			"scripts": {
-				"steeve@woot": [ "rsync -av DCIM/ /data/photos/steeve/nexus_5/DCIM/" ]
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ DCIM/ /data/photos/steeve/nexus_5/DCIM/", "~/bin/steeve_snl.sh /data/photos/steeve/nexus_5/DCIM/" ]
 			}
 		},
 		"steeve_debug": {
 			"vendor": "18d1:4ee2",
 			"dst": "/home/tmp/steeve/nexus_5/backup/",
 			"scripts": {
-				"steeve@woot": [ "rsync -av DCIM/ /data/photos/steeve/nexus_5/DCIM/" ]
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ DCIM/ /data/photos/steeve/nexus_5/DCIM/", "~/bin/steeve_snl.sh /data/photos/steeve/nexus_5/DCIM/" ]
 			}
 		},
 		"nexus_7": {
