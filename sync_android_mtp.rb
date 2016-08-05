@@ -395,27 +395,44 @@ def sync_delete(dest, fname)
 	end
 end
 
+def sync_mtime(dname, fmtime, dmtime)
+	return unless $opts[:from]
+	return if dmtime.eql?(fmtime)
+	vputs "Setting mtime = #{fmtime}: #{dname}"
+	return if $opts[:dryrun]
+	FileUtils.touch(dname, :mtime=>fmtime)
+end
+
 def sync_file(dest, fname)
-	fsize=File.lstat(fname).size
+	fstat=File.lstat(fname)
+	fsize=fstat.size
+	fmtime=fstat.mtime
 	dname=File.join(dest, fname)
 	dsize=-1
-	dsize=File.lstat(dname).size if File.exists?(dname)
-	size_sync=fsize == dsize
-	# size is the same, assume files are synced
-	return fsize if size_sync
-	vputs "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}"
-	return fsize if $opts[:dryrun]
-	begin
-		File.open(fname, "rb") { |fsrc|
-			File.open(dname, "wb") { |fdst|
-				sync_blocks(fsrc, fdst, fsize, 1024*1024)
-			}
-		}
-		return fsize
-	rescue => e
-		$log.error "Failed to sync #{fname} to #{dname}: #{e.message}"
+	dmtime=-1
+	if File.exists?(dname)
+		dsize = File.lstat(dname).size
+		dmtime = File.lstat(dname).mtime
 	end
-	return 0
+	dsize=File.exists?(dname) ? File.lstat(dname).size : -1
+	# size is the same, assume files are synced
+	if fsize != dsize && fmtime != dmtime
+		vputs "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}"
+		begin
+			if !$opts[:dryrun]
+				File.open(fname, "rb") { |fsrc|
+					File.open(dname, "wb") { |fdst|
+						sync_blocks(fsrc, fdst, fsize, 1024*1024)
+					}
+				}
+			end
+		rescue => e
+			$log.error "Failed to sync #{fname} to #{dname}: #{e.message}"
+			return 0
+		end
+	end
+	sync_mtime(dname, fmtime, dmtime)
+	return fsize
 end
 
 def sync_dir(dest, dname)
