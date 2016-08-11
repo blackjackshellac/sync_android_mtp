@@ -2,11 +2,20 @@
 	"configs": {
 		"lissa": {
 			"vendor": "18d1:4ee1",
-			"dst": "/home/tmp/lissa/nexus_5/backup/"
+			"dst": "/home/tmp/lissa/nexus_5/backup/",
+			"perms": {
+				"owner": "lissa:snl",
+				"mode": "0644"
+			}
 		},
 		"steeve": {
 			"vendor": "18d1:4ee1",
 			"dst": "/home/tmp/steeve/nexus_5/backup/",
+			"perms": {
+				"owner": "steeve",
+				"group": "snl",
+				"mode": "0640"
+			},
 			"scripts": {
 				"steeve@woot": [ "rsync -av --exclude .thumbnails/ DCIM/ /data/photos/steeve/nexus_5/DCIM/", "~/bin/steeve_snl.sh /data/photos/steeve/nexus_5/DCIM/" ]
 			}
@@ -14,13 +23,23 @@
 		"steeve_debug": {
 			"vendor": "18d1:4ee2",
 			"dst": "/home/tmp/steeve/nexus_5/backup/",
+			"perms": {
+				"owner": "steeve",
+				"group": "snl",
+				"mode": "0640"
+			},
 			"scripts": {
 				"steeve@woot": [ "rsync -av --exclude .thumbnails/ DCIM/ /data/photos/steeve/nexus_5/DCIM/", "~/bin/steeve_snl.sh /data/photos/steeve/nexus_5/DCIM/" ]
 			}
 		},
 		"nexus_7": {
 			"vendor": "18d1:4e42",
-			"dst": "/home/tmp/steeve/nexus_7/backup/"
+			"dst": "/home/tmp/steeve/nexus_7/backup/",
+			"perms": {
+				"owner": "steeve",
+				"group": "snl",
+				"mode": "0644"
+			}
 		}
 	}
 }

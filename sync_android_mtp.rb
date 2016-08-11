@@ -90,6 +90,7 @@ $opts = {
 	:dirs => [],
 	:dryrun => false,
 	:scripts => [],
+	:perms => {},
 	:run_scripts => false,
 	:verbose => false,
 	:progress => false,
@@ -403,6 +404,35 @@ def sync_mtime(dname, fmtime, dmtime)
 	FileUtils.touch(dname, :mtime=>fmtime)
 end
 
+def sync_owner(dname, owner)
+	return if owner.nil? || owner.empty?
+	vputs "Setting owner #{owner}: #{dname}"
+	%x/chown #{owner} "#{dname}"/
+	throw "Failed to set owner #{owner}: #{dname}" unless $?.exitstatus == 0
+end
+
+def sync_group(dname, group)
+	return if group.nil? || group.empty?
+	vputs "Setting group #{group}: #{dname}"
+	%x/chgrp #{group} "#{dname}"/
+	throw "Failed to set group #{group}: #{dname}" unless $?.exitstatus == 0
+end
+
+def sync_mode(dname, mode)
+	return if mode.nil? || mode.empty?
+	vputs "Setting mode #{mode}: #{dname}"
+	%x/chmod #{mode} "#{dname}"/
+	throw "Failed to set mode #{mode}: #{dname}" unless $?.exitstatus == 0
+end
+
+def sync_perms(dname, perms)
+	return if perms.empty?
+	sync_owner(dname, perms[:owner]) if perms.key?(:owner)
+	sync_group(dname, perms[:group]) if perms.key?(:group)
+	sync_mode(dname, perms[:mode]) if perms.key?(:mode)
+	
+end
+
 def sync_file(dest, fname)
 	fstat=File.lstat(fname)
 	fsize=fstat.size
@@ -415,8 +445,8 @@ def sync_file(dest, fname)
 		dmtime = File.lstat(dname).mtime
 	end
 	dsize=File.exists?(dname) ? File.lstat(dname).size : -1
-	# size is the same, assume files are synced
-	if fsize != dsize && fmtime != dmtime
+	# size and date are the same, assume files are synced
+	if fsize != dsize || !fmtime.eql?(dmtime)
 		vputs "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}"
 		begin
 			if !$opts[:dryrun]
@@ -431,6 +461,7 @@ def sync_file(dest, fname)
 			return 0
 		end
 	end
+	sync_perms(dname, $opts[:perms])
 	sync_mtime(dname, fmtime, dmtime)
 	return fsize
 end
