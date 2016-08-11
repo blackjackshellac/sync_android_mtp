@@ -90,6 +90,7 @@ $opts = {
 	:dirs => [],
 	:dryrun => false,
 	:scripts => [],
+	:perms => {},
 	:run_scripts => false,
 	:verbose => false,
 	:progress => false,
@@ -334,6 +335,28 @@ HELP
 			$stdout=$log
 		end
 
+		unless gopts[:perms].empty?
+			perms=gopts[:perms]
+			owner=perms[:owner]
+			group=perms[:group]
+			mode=perms[:mode]
+			uid=nil
+			gid=nil
+
+			owner,group=owner.split(/\s*:\s*/,2) unless owner.nil?
+			uid=Etc.getpwnam(owner).uid unless owner.nil?
+			gid=Etc.getgrnam(group).gid unless group.nil?
+			mode=Integer(mode, 8) unless mode.nil?
+
+			perms[:owner]=owner
+			perms[:group]=group
+			perms[:mode]=mode
+			perms[:uid]=uid
+			perms[:gid]=gid
+			gopts[:perms]=perms
+
+		end
+
 		vputs "gopts=#{gopts.inspect}"
 
 	rescue OptionParser::InvalidOption => e
@@ -403,20 +426,63 @@ def sync_mtime(dname, fmtime, dmtime)
 	FileUtils.touch(dname, :mtime=>fmtime)
 end
 
+def sync_owner(dname, dstat, owner, uid)
+	return if owner.nil? || owner.empty? || uid.nil?
+	return if dstat.uid == uid
+	vputs "Setting owner #{owner}: #{dname}"
+	#%x/chown #{owner} "#{dname}"/
+	#throw "Failed to set owner #{owner}: #{dname}" unless $?.exitstatus == 0
+	FileUtils.chown(owner, nil, dname) unless $opts[:dryrun]
+end
+
+def sync_group(dname, dstat, group, gid)
+	return if group.nil? || group.empty? || gid.nil?
+	return if dstat.gid == gid
+	vputs "Setting group #{group}: #{dname}"
+	#%x/chgrp #{group} "#{dname}"/
+	#throw "Failed to set group #{group}: #{dname}" unless $?.exitstatus == 0
+	FileUtils.chown(nil, group, dname) unless $opts[:dryrun]
+end
+
+def sync_mode(dname, dstat, mode)
+	return if mode.nil?
+	return if (dstat.mode & 0777) == mode
+	begin
+	vputs "Setting mode 0%o: %s" % [ mode, dname ]
+	rescue => e
+		vputs "#{dname}: #{mode}: #{e}"
+		exit 1
+	end
+	#%x/chmod #{mode} "#{dname}"/
+	#throw "Failed to set mode #{mode}: #{dname}" unless $?.exitstatus == 0
+	FileUtils.chmod mode, dname unless $opts[:dryrun]
+end
+
+def sync_perms(dname, dstat, perms)
+	return unless $opts[:from]
+	return if perms.empty?
+	sync_owner(dname, dstat, perms[:owner], perms[:uid])
+	sync_group(dname, dstat, perms[:group], perms[:gid])
+	sync_mode(dname, dstat, perms[:mode])
+	
+end
+
 def sync_file(dest, fname)
 	fstat=File.lstat(fname)
 	fsize=fstat.size
 	fmtime=fstat.mtime
 	dname=File.join(dest, fname)
+	dstat=nil
 	dsize=-1
 	dmtime=-1
 	if File.exists?(dname)
-		dsize = File.lstat(dname).size
-		dmtime = File.lstat(dname).mtime
+		dstat=File.lstat(dname)
+		dsize = dstat.size
+		dmtime = dstat.mtime
 	end
 	dsize=File.exists?(dname) ? File.lstat(dname).size : -1
-	# size is the same, assume files are synced
-	if fsize != dsize && fmtime != dmtime
+	# size and date are the same, assume files are synced
+	if fsize != dsize || !fmtime.eql?(dmtime)
 		vputs "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}"
 		begin
 			if !$opts[:dryrun]
@@ -431,6 +497,8 @@ def sync_file(dest, fname)
 			return 0
 		end
 	end
+	dstat=File.lstat(dname) if dstat.nil?
+	sync_perms(dname, dstat, $opts[:perms])
 	sync_mtime(dname, fmtime, dmtime)
 	return fsize
 end
