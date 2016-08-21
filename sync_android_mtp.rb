@@ -560,6 +560,7 @@ def sync(sdir, ddir, record=nil)
 		} unless $opts[:dryrun]
 		if $opts[:run_scripts]
 			$opts[:scripts].each { |script|
+				script.gsub!('%DST%', $opts[:dst])
 				Runner.run(script, $opts[:dryrun])
 			}
 		end
