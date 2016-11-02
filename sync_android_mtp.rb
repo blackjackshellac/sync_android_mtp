@@ -97,6 +97,8 @@ $opts = {
 	:from => true,
 	:sync => false,
 	:yes => false,
+	:print => false,
+	:config => nil,
 	:log => nil,
 	:delete_skipped_to => false
 }
@@ -186,6 +188,9 @@ def parse(gopts, jcfg)
 				config=jcfg[:configs][name]
 				$log.die "Unknown config name #{name}" if config.nil?
 				$log.info "Setting config values for #{name}"
+
+				gopts[:config] = config
+
 				config.keys.each { |key|
 					if key.eql?(:scripts)
 						# $opts[scripts]={:woot=>["rsync -av DCIM/ /data/photos/steeve/nexus_5/DCIM/"]}
@@ -282,6 +287,10 @@ def parse(gopts, jcfg)
 				$log.level = Logger::DEBUG
 			}
 
+			opts.on('--print', "Print specified config (-c) and exit") {
+				gopts[:print] = true
+			}
+
 			opts.on('-h', '--help', "Help") {
 				$stdout.puts ""
 				$stdout.puts opts
@@ -299,6 +308,10 @@ HELP
 		}
 		optparser.parse!
 
+		if gopts[:print]
+			puts JSON.pretty_generate(gopts[:config])
+			exit 0
+		end
 		if gopts[:sync]
 			$log.die "Cannot use --to with --sync" unless gopts[:from]
 			gopts[:from]=true
