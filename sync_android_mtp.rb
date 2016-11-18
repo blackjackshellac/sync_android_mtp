@@ -100,7 +100,9 @@ $opts = {
 	:print => false,
 	:config => nil,
 	:log => nil,
-	:delete_skipped_to => false
+	:delete_skipped_to => false,
+	:link => nil,
+	:now => Time.now.strftime("%Y%m%d")
 }
 
 def readConfig
@@ -203,7 +205,8 @@ def parse(gopts, jcfg)
 							gopts[:scripts]=config[key][user_hostname]
 						end
 					else
-						$log.die "Unknown config value #{key}" unless gopts.key?(key)
+						# Invalid config key if it is not found in gopts (aka $opts)
+						$log.die "Unknown config key #{key}" unless gopts.key?(key)
 						gopts[key]=config[key]
 					end
 					$log.info "gopts[#{key}]=#{config[key]}"
@@ -481,6 +484,29 @@ def sync_perms(dname, dstat, opts)
 	
 end
 
+def sync_link(dname, opts)
+	return if opts[:link].nil?
+	#Sync Music/Cohen,_Leonard/Live_Songs/d1t01-leonard_cohen-minute_prologue.ogg:902272 ->
+	#/home/tmp/steeve/nexus_5/backup/Internal storage/Music/Cohen,_Leonard/Live_Songs/d1t01-leonard_cohen-minute_prologue.ogg:-1
+	# opts[:dst] = "/home/tmp/steeve/nexus_5/backup/",
+	#
+	# TODO links = dirname(opts[:dst])/links
+	#
+	# re=/^#{Regexp.quote(opts[:dst])}[\/]?(.*)/
+	#
+	opts[:dst_re]=/^#{Regexp.quote(opts[:dst])}[\/]?(.*)/ if opts[:dst_re].nil?
+	#
+	return if dname[opts[:dst_re]].nil?
+	flink = File.join(opts[:link], opts[:now], $1)
+	return if File.exists?(flink)
+	flink_dir = File.dirname(flink)
+	unless opts[:dryrun]
+		vputs "Link #{dname} -> #{flink}"
+		FileUtils.mkdir_p(flink_dir)
+		FileUtils.ln_s(dname, flink)
+	end
+end
+
 def sync_file(dest, fname, opts)
 	fstat=File.lstat(fname)
 	fsize=fstat.size
@@ -497,19 +523,16 @@ def sync_file(dest, fname, opts)
 	dsize=File.exists?(dname) ? File.lstat(dname).size : -1
 	# size and date are the same, assume files are synced
 	if fsize != dsize || !fmtime.eql?(dmtime)
-		#Sync Music/Cohen,_Leonard/Live_Songs/d1t01-leonard_cohen-minute_prologue.ogg:902272 ->
-		#/home/tmp/steeve/nexus_5/backup/Internal storage/Music/Cohen,_Leonard/Live_Songs/d1t01-leonard_cohen-minute_prologue.ogg:-1
-		# opts[:dst] = "/home/tmp/steeve/nexus_5/backup/",
-		# TODO links = dirname(opts[:dst])/links
 		vputs "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}"
 		begin
-			if !opts[:dryrun]
+			unless opts[:dryrun]
 				File.open(fname, "rb") { |fsrc|
 					File.open(dname, "wb") { |fdst|
 						sync_blocks(fsrc, fdst, fsize, 1024*1024, opts)
 					}
 				}
 			end
+			sync_link(dname, opts)
 		rescue => e
 			$log.error "Failed to sync #{fname} to #{dname}: #{e.message}"
 			return 0
