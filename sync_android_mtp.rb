@@ -100,7 +100,9 @@ $opts = {
 	:print => false,
 	:config => nil,
 	:log => nil,
-	:delete_skipped_to => false
+	:delete_skipped_to => false,
+	:link => nil,
+	:now => Time.now.strftime("%Y%m%d")
 }
 
 def readConfig
@@ -203,7 +205,8 @@ def parse(gopts, jcfg)
 							gopts[:scripts]=config[key][user_hostname]
 						end
 					else
-						$log.die "Unknown config value #{key}" unless gopts.key?(key)
+						# Invalid config key if it is not found in gopts (aka $opts)
+						$log.die "Unknown config key #{key}" unless gopts.key?(key)
 						gopts[key]=config[key]
 					end
 					$log.info "gopts[#{key}]=#{config[key]}"
@@ -387,7 +390,7 @@ end
 $cfg = parseConfig(readConfig())
 $opts=parse($opts, $cfg)
 
-def sync_blocks(fsrc, fdst, fsize, length)
+def sync_blocks(fsrc, fdst, fsize, length, opts)
 	offset=0
 	while true
 		length=fsize if fsize < length
@@ -400,64 +403,64 @@ def sync_blocks(fsrc, fdst, fsize, length)
 		data=fsrc.read length
 		fdst.write data
 
-		print "=" if $opts[:progress]
+		print "=" if opts[:progress]
 
 		offset += length
 		fsize  -= length
 		break if fsize <= 0
 	end
-	$stdout.puts "" if $opts[:progress]
+	$stdout.puts "" if opts[:progress]
 end
 
-def ask_yes_no_all(prompt)
+def ask_yes_no_all(prompt, opts)
 	prompt+= " [y/N/all] $ "
-	return true if $opts[:yes]
+	return true if opts[:yes]
 	line=Readline.readline(prompt).strip
 	unless line[/all/i].nil?
-		$opts[:yes]=true
+		opts[:yes]=true
 		return true
 	end
 	return line[/(y|yes)/i].nil? ? false : true
 end
 
-def sync_delete(dest, fname)
+def sync_delete(dest, fname, opts)
 	dname=File.join(dest, fname)
 	found=File.exist?(dname)
 	return unless found
-	if ask_yes_no_all("Delete #{dname}")
+	if ask_yes_no_all("Delete #{dname}", opts)
 		$log.debug "Deleting destination #{dname}"
-		opts={ :verbose => $opts[:verbose] }
-		FileUtils.rm_f(dname, opts) unless $opts[:dryrun]
+		opts={ :verbose => opts[:verbose] }
+		FileUtils.rm_f(dname, opts) unless opts[:dryrun]
 	end
 end
 
-def sync_mtime(dname, fmtime, dmtime)
-	return unless $opts[:from]
+def sync_mtime(dname, fmtime, dmtime, opts)
+	return unless opts[:from]
 	return if dmtime.eql?(fmtime)
 	vputs "Setting mtime = #{fmtime}: #{dname}"
-	return if $opts[:dryrun]
+	return if opts[:dryrun]
 	FileUtils.touch(dname, :mtime=>fmtime)
 end
 
-def sync_owner(dname, dstat, owner, uid)
+def sync_owner(dname, dstat, owner, uid, opts)
 	return if owner.nil? || owner.empty? || uid.nil?
 	return if dstat.uid == uid
 	vputs "Setting owner #{owner}: #{dname}"
 	#%x/chown #{owner} "#{dname}"/
 	#throw "Failed to set owner #{owner}: #{dname}" unless $?.exitstatus == 0
-	FileUtils.chown(owner, nil, dname) unless $opts[:dryrun]
+	FileUtils.chown(owner, nil, dname) unless opts[:dryrun]
 end
 
-def sync_group(dname, dstat, group, gid)
+def sync_group(dname, dstat, group, gid, opts)
 	return if group.nil? || group.empty? || gid.nil?
 	return if dstat.gid == gid
 	vputs "Setting group #{group}: #{dname}"
 	#%x/chgrp #{group} "#{dname}"/
 	#throw "Failed to set group #{group}: #{dname}" unless $?.exitstatus == 0
-	FileUtils.chown(nil, group, dname) unless $opts[:dryrun]
+	FileUtils.chown(nil, group, dname) unless opts[:dryrun]
 end
 
-def sync_mode(dname, dstat, mode)
+def sync_mode(dname, dstat, mode, opts)
 	return if mode.nil?
 	return if (dstat.mode & 0777) == mode
 	begin
@@ -468,19 +471,43 @@ def sync_mode(dname, dstat, mode)
 	end
 	#%x/chmod #{mode} "#{dname}"/
 	#throw "Failed to set mode #{mode}: #{dname}" unless $?.exitstatus == 0
-	FileUtils.chmod mode, dname unless $opts[:dryrun]
+	FileUtils.chmod mode, dname unless opts[:dryrun]
 end
 
-def sync_perms(dname, dstat, perms)
-	return unless $opts[:from]
+def sync_perms(dname, dstat, opts)
+	return unless opts[:from]
+	perms = opts[:perms]||{}
 	return if perms.empty?
-	sync_owner(dname, dstat, perms[:owner], perms[:uid])
-	sync_group(dname, dstat, perms[:group], perms[:gid])
-	sync_mode(dname, dstat, perms[:mode])
+	sync_owner(dname, dstat, perms[:owner], perms[:uid], opts)
+	sync_group(dname, dstat, perms[:group], perms[:gid], opts)
+	sync_mode(dname, dstat, perms[:mode], opts)
 	
 end
 
-def sync_file(dest, fname)
+def sync_link(dname, opts)
+	return if opts[:link].nil?
+	#Sync Music/Cohen,_Leonard/Live_Songs/d1t01-leonard_cohen-minute_prologue.ogg:902272 ->
+	#/home/tmp/steeve/nexus_5/backup/Internal storage/Music/Cohen,_Leonard/Live_Songs/d1t01-leonard_cohen-minute_prologue.ogg:-1
+	# opts[:dst] = "/home/tmp/steeve/nexus_5/backup/",
+	#
+	# TODO links = dirname(opts[:dst])/links
+	#
+	# re=/^#{Regexp.quote(opts[:dst])}[\/]?(.*)/
+	#
+	opts[:dst_re]=/^#{Regexp.quote(opts[:dst])}[\/]?(.*)/ if opts[:dst_re].nil?
+	#
+	return if dname[opts[:dst_re]].nil?
+	flink = File.join(opts[:link], opts[:now], $1)
+	return if File.exists?(flink)
+	flink_dir = File.dirname(flink)
+	unless opts[:dryrun]
+		vputs "Link #{dname} -> #{flink}"
+		FileUtils.mkdir_p(flink_dir)
+		FileUtils.ln_s(dname, flink)
+	end
+end
+
+def sync_file(dest, fname, opts)
 	fstat=File.lstat(fname)
 	fsize=fstat.size
 	fmtime=fstat.mtime
@@ -498,50 +525,51 @@ def sync_file(dest, fname)
 	if fsize != dsize || !fmtime.eql?(dmtime)
 		vputs "Sync #{fname}:#{fsize} -> #{dname}:#{dsize}"
 		begin
-			if !$opts[:dryrun]
+			unless opts[:dryrun]
 				File.open(fname, "rb") { |fsrc|
 					File.open(dname, "wb") { |fdst|
-						sync_blocks(fsrc, fdst, fsize, 1024*1024)
+						sync_blocks(fsrc, fdst, fsize, 1024*1024, opts)
 					}
 				}
 			end
+			sync_link(dname, opts)
 		rescue => e
 			$log.error "Failed to sync #{fname} to #{dname}: #{e.message}"
 			return 0
 		end
 	end
 	dstat=File.lstat(dname) if dstat.nil?
-	sync_perms(dname, dstat, $opts[:perms])
-	sync_mtime(dname, fmtime, dmtime)
+	sync_perms(dname, dstat, opts)
+	sync_mtime(dname, fmtime, dmtime, opts)
 	return fsize
 end
 
-def sync_dir(dest, dname)
+def sync_dir(dest, dname, opts)
 	toplevel=dname.chomp("/").scan(/\//).length == 0
 	ddir=File.join(dest, dname)
-	$log.info "Syncing to #{ddir}" if toplevel && $opts[:verbose]
-	return if File.directory?(ddir) || $opts[:dryrun]
-	$log.info "Creating directory #{ddir}" unless toplevel || !$opts[:verbose]
+	$log.info "Syncing to #{ddir}" if toplevel && opts[:verbose]
+	return if File.directory?(ddir) || opts[:dryrun]
+	$log.info "Creating directory #{ddir}" unless toplevel || !opts[:verbose]
 	FileUtils.mkdir_p(ddir)
 end
 
 RE_ANDROID_DATA_CACHE=/^Android\/data\/.*?\/cache\//i
 RE_THUMBNAILS=/(^|\/).thumbnails\//i
 RE_SKIP_ARRAY = [ RE_ANDROID_DATA_CACHE, RE_THUMBNAILS ]
-def skip_path(path)
+def skip_path(path, opts)
 	skip=false
 	# /^Android\/data\/.*\/cache\//i
 	RE_SKIP_ARRAY.each { |re|
 		m=re.match(path)
 		next if m.nil?
-		$log.debug "Skipping path #{path}: #{re.to_s}" if $opts[:verbose]
+		$log.debug "Skipping path #{path}: #{re.to_s}" if opts[:verbose]
 		skip=true
 		break
 	}
 	return skip
 end
 
-def sync(sdir, ddir, record=nil)
+def sync_src_dst(sdir, ddir, record=nil, opts)
 	skip = false
 	total=0
 	files=0
@@ -554,27 +582,27 @@ def sync(sdir, ddir, record=nil)
 			# strip off ./
 			e=e[2..-1]
 			next if e.nil?
-			skip=skip_path(e)
+			skip=skip_path(e, opts)
 			if File.directory?(e)
 				next if skip
 				dirs+=1
-				sync_dir(ddir, e)
+				sync_dir(ddir, e, opts)
 			elsif File.file?(e)
 				if skip
-					sync_delete(ddir, e) if $opts[:delete_skipped_to]
+					sync_delete(ddir, e, opts) if opts[:delete_skipped_to]
 					next
 				end
 				files += 1
-				total += sync_file(ddir, e)
+				total += sync_file(ddir, e, opts)
 				record[e]=true unless record.nil?
 			else
 				$log.warn "Skipping file #{e}: #{File.lstat(e).inspect}"
 			end
-		} unless $opts[:dryrun]
-		if $opts[:run_scripts]
-			$opts[:scripts].each { |script|
-				script.gsub!('%DST%', $opts[:dst])
-				Runner.run(script, $opts[:dryrun])
+		} unless opts[:dryrun]
+		if opts[:run_scripts]
+			opts[:scripts].each { |script|
+				script.gsub!('%DST%', opts[:dst])
+				Runner.run(script, opts[:dryrun])
 			}
 		end
 	}
@@ -584,20 +612,20 @@ def sync(sdir, ddir, record=nil)
 	vputs("Synced #{files} files and #{dirs} dirs: #{mb} MB in #{tend} secs - #{mb/tend} MB/s", true)
 end
 
-def sync_toplevel(toplevel)
+def sync_toplevel(toplevel, opts)
 	$log.info "toplevel="+toplevel
-	$log.info "src="+$opts[:src]
-	$log.info "dst="+$opts[:dst]
+	$log.info "src="+opts[:src]
+	$log.info "dst="+opts[:dst]
 	
-	src=File.join($opts[:src], toplevel)
-	dst=File.join($opts[:dst], toplevel)
+	src=File.join(opts[:src], toplevel)
+	dst=File.join(opts[:dst], toplevel)
 
 	$log.info "Backup #{src} to #{dst}"
 
-	record = $opts[:sync] ? {} : nil
+	record = opts[:sync] ? {} : nil
 	FileUtils.mkdir_p(dst)
-	sync(src, dst, record)
-	if $opts[:sync]
+	sync_src_dst(src, dst, record, opts)
+	if opts[:sync]
 		$log.info "Recorded #{record.size} files in sync from"
 		# delete files in dst that were not recorded during first sync
 		FileUtils.chdir(dst) {
@@ -609,12 +637,12 @@ def sync_toplevel(toplevel)
 				next unless File.file?(e)
 				next if record.key?(e)
 				vputs("Found file not recorded in src: #{e}",true)
-				sync_delete(dst, e)
+				sync_delete(dst, e, opts)
 			}
 		}
 		src,dst=dst,src
-		$opts[:delete_skipped_to]=false
-		$opts[:from]=false
+		opts[:delete_skipped_to]=false
+		opts[:from]=false
 		#sync(src, dst)
 	end
 end
@@ -622,7 +650,7 @@ end
 begin
 	$log.die "No dirs found in #{$opts[:src]}" if $opts[:dirs].empty?
 	$opts[:dirs].each { |toplevel|
-		sync_toplevel(toplevel)
+		sync_toplevel(toplevel, $opts)
 	}
 rescue Errno::EIO => e
 	$log.die "Quitting on IO error: #{e.message}"

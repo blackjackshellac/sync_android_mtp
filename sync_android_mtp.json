@@ -13,7 +13,8 @@
 		},
 		"steeve": {
 			"vendor": "18d1:4ee1",
-			"dst": "/home/tmp/steeve/nexus_5/backup/",
+			"dst":  "/home/tmp/steeve/nexus_5/backup/",
+			"link": "/home/tmp/steeve/nexus_5/links",
 			"perms": {
 				"owner": "steeve",
 				"group": "snl",
