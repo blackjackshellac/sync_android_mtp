@@ -3,6 +3,7 @@
 		"lissa": {
 			"vendor": "18d1:4ee1",
 			"dst": "/home/tmp/lissa/nexus_5/backup/",
+			"link": "/home/tmp/lissa/nexus_5/links",
 			"perms": {
 				"owner": "steeve:snl",
 				"mode": "0664"
@@ -27,6 +28,7 @@
 		"steeve_debug": {
 			"vendor": "18d1:4ee2",
 			"dst": "/home/tmp/steeve/nexus_5/backup/",
+			"link": "/home/tmp/steeve/nexus_5/links",
 			"perms": {
 				"owner": "steeve",
 				"group": "snl",
