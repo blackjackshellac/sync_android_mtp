@@ -83,7 +83,7 @@ $log=set_logger(STDERR)
 
 $opts = {
 	:uid=>%x/id -u/.strip,
-	:vendor => ENV["SYNC_MTP_VENDOR"]||"18d1",
+	:vendor => ENV["SYNC_MTP_VENDOR"]||"",
 	:product => ENV["SYNC_MTP_PRODUCT"]||"",
 	:src => "",
 	:dst => ENV["SYNC_MTP_BACKUP"]||DST,
@@ -132,22 +132,47 @@ def getSymbol(string)
 	string.to_sym
 end
 
-def run(cmd, err_msg=nil, opts={:trim=>false,:fail=>true})
-	err_msg="Command failed to run: #{cmd}"
-	out=%x/#{cmd}/
-	if $?.exitstatus != 0
-		$log.die err_msg if opts[:fail]
-		return nil
-	end
-	return opts[:trim] ? out.strip! : out
+def detect(gopts, jcfg)
+	return gopts unless gopts[:vendor].empty?
+
+	$log.info "Detecting usb devices"
+	configs=jcfg[:configs]
+
+# $ lsusb
+# Bus 003 Device 019: ID 18d1:4ee1 Google Inc. Nexus Device (MTP)
+
+	out=Runner.run("lsusb", { :fail=>true, :strip=>true, :errmsg=>"Failed to list usb devices" } )
+
+	out.split(/\n/).each { |line|
+		line.strip!
+		next if line[/Bus\s[\d]{3}\sDevice\s[\d]{3}:\sID\s([\w]{4}):([\w]{4})\s(.*)/].nil?
+		vend=$1
+		prod=$2
+		desc=$3
+		vendor="#{vend}:#{prod}"
+		configs.each_pair { |name,cfg|
+			v=cfg[:vendor]
+			if v.eql?(vendor)
+				$log.info "Detected #{vend}:#{prod}: [#{desc}] [#{name}]"
+				gopts[:vendor]=vend
+				gopts[:product]=prod
+				return gopts
+			end
+		}
+	}
+	$log.warn "No known usb devices detected"
+	gopts
 end
 
-def get_mtp_directory(uid)
-	dev="#{$opts[:vendor]}"
-	dev+=":#{$opts[:product]}" unless $opts[:product].empty?
+def get_mtp_directory(gopts, jcfg)
+	gopts = detect(gopts, jcfg)
+
+	uid=gopts[:uid]
+	dev="#{gopts[:vendor]}"
+	dev+=":#{gopts[:product]}" unless gopts[:product].empty?
 	$log.info "lsusb -d #{dev}"
-	out=run("lsusb -d #{dev}", "Failed to list usb device #{dev}", :trim=>true, :fail=>false)
-	return nil if out.nil?
+	out=Runner.run("lsusb -d #{dev}", {:errmsg=>"Failed to list usb device #{dev}", :trim=>true, :fail=>false})
+	return nil if out.nil? || out.empty?
 
 	$log.die "" if out[/Bus\s(\d+)\s/].nil?
 	usbbus=$1
@@ -181,7 +206,7 @@ end
 def parse(gopts, jcfg)
 	begin
 		config_names=jcfg[:configs].keys
-		mtp_dir=get_mtp_directory($opts[:uid])||"device not detected"
+		mtp_dir=get_mtp_directory(gopts, jcfg)||"device not detected"
 		optparser = OptionParser.new { |opts|
 			opts.banner = "#{ME}.rb [options]\n"
 
@@ -321,7 +346,7 @@ HELP
 			gopts[:record]=true
 			gopts[:delete_skipped_to]=true
 		end
-		src=get_mtp_directory(gopts[:uid])
+		src=get_mtp_directory(gopts, jcfg)
 
 		$log.die "src directory not found for uid=#{gopts[:uid]}: #{gopts.to_json}" if src.nil?
 
@@ -481,7 +506,6 @@ def sync_perms(dname, dstat, opts)
 	sync_owner(dname, dstat, perms[:owner], perms[:uid], opts)
 	sync_group(dname, dstat, perms[:group], perms[:gid], opts)
 	sync_mode(dname, dstat, perms[:mode], opts)
-	
 end
 
 def sync_link(dname, opts)
@@ -602,7 +626,7 @@ def sync_src_dst(sdir, ddir, record=nil, opts)
 		if opts[:run_scripts]
 			opts[:scripts].each { |script|
 				script.gsub!('%DST%', opts[:dst])
-				Runner.run(script, opts[:dryrun])
+				Runner.run(script, opts)
 			}
 		end
 	}
@@ -616,7 +640,7 @@ def sync_toplevel(toplevel, opts)
 	$log.info "toplevel="+toplevel
 	$log.info "src="+opts[:src]
 	$log.info "dst="+opts[:dst]
-	
+
 	src=File.join(opts[:src], toplevel)
 	dst=File.join(opts[:dst], toplevel)
 
