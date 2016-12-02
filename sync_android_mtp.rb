@@ -132,6 +132,16 @@ def getSymbol(string)
 	string.to_sym
 end
 
+def parse_lsusb(line)
+	h=nil
+	m=line.match(/Bus\s(?<bus>[\d]{3})\sDevice\s(?<dev>[\d]{3}):\sID\s(?<vendor>[\w]{4}):(?<product>[\w]{4})\s(?<desc>.*)/)
+	unless m.nil?
+		h={}
+		m.names.each { |key| h[key.to_sym] = m[key] }
+	end
+	return h
+end
+
 def detect(gopts, jcfg)
 	return gopts unless gopts[:vendor].empty?
 
@@ -145,10 +155,14 @@ def detect(gopts, jcfg)
 
 	out.split(/\n/).each { |line|
 		line.strip!
-		next if line[/Bus\s[\d]{3}\sDevice\s[\d]{3}:\sID\s([\w]{4}):([\w]{4})\s(.*)/].nil?
-		vend=$1
-		prod=$2
-		desc=$3
+		#next if line[/Bus\s([\d]{3})\sDevice\s([\d]{3}):\sID\s([\w]{4}):([\w]{4})\s(.*)/].nil?
+		h=parse_lsusb(line)
+		next if h.nil?
+		bus=h[:bus]
+		dev=h[:dev]
+		vend=h[:vendor]
+		prod=h[:product]
+		desc=h[:desc]
 		vendor="#{vend}:#{prod}"
 		configs.each_pair { |name,cfg|
 			v=cfg[:vendor]
@@ -174,16 +188,22 @@ def get_mtp_directory(gopts, jcfg)
 	out=Runner.run("lsusb -d #{dev}", {:errmsg=>"Failed to list usb device #{dev}", :trim=>true, :fail=>false})
 	return nil if out.nil? || out.empty?
 
-	$log.die "" if out[/Bus\s(\d+)\s/].nil?
-	usbbus=$1
-	$log.die "" if out[/Device\s(\d+):/].nil?
-	usbdevice=$1
+	h=parse_lsusb(out)
+	$log.die "Failed to parse lsusb -d #{dev} output [#{out}]" if h.nil?
+	#usbbus=h[:bus]
+	#usbdevice=h[:dev]
 
 	rtdir="/run/user/#{uid}/"
 	$log.die "Runtime dir not found #{rtdir}" unless File.directory?(rtdir)
+	mtp_dir=File.join(rtdir, "gvfs/mtp:host=%5Busb%3A#{h[:bus]}%2C#{h[:dev]}%5D/")
 
-	mtp_dir=File.join(rtdir, "gvfs/mtp:host=%5Busb%3A#{usbbus}%2C#{usbdevice}%5D/")
-	$log.warn "mtp dir not mounted #{mtp_dir}" unless File.directory?(mtp_dir)
+	#gvfs-mount "mtp://[usb:003,003]/"
+	#gvfs-mount "mtp://[usb:#{h[:bus]},#{h[:dev]}]/"
+	unless File.directory?(mtp_dir)
+		$log.info "Mounting mtp dir #{mtp_dir}" 
+		out=Runner.run(%Q[gvfs-mount 'mtp://[usb:#{h[:bus]},#{h[:dev]}]/'], {:fail=>false})
+		puts out unless out.empty?
+	end
 
 	$log.info "mtp_dir="+mtp_dir
 
