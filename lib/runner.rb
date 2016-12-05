@@ -7,8 +7,19 @@ module Runner
 		:dryrun=>false,
 		:trim => false,
 		:fail => true,
+		:verbose => false,
 		:errmsg => "Command failed to run"
 	}
+
+	@@log = Logger.new(STDERR)
+
+	def self.init(opts)
+		DEF_OPTS.keys.each { |key|
+			next unless opts.key?(key)
+			DEF_OPTS[key]=opts[key]
+		}
+		@@log = opts[:logger] if opts.key?(:logger)
+	end
 
 	def self.gov(opts, key)
 		return opts.key?(key) ? opts[key] : DEF_OPTS[key]
@@ -46,12 +57,15 @@ module Runner
 	def self.run(cmd, opts={})
 		err_msg=gov(opts, :errmsg)
 		return "" if gov(opts, :dryrun)
+		@@log.info "run [#{cmd}]" if gov(opts, :verbose)
 		out=%x/#{cmd} 2>&1/
-		if $?.exitstatus != 0
+		if $?.exitstatus == 0
+			puts out if gov(opts, :verbose)
+		else
 			f=gov(opts, :fail)
 			if f == true
-				$log.error out
-				$log.die err_msg
+				@@log.error out
+				@@log.die err_msg
 			end
 			out=""
 		end

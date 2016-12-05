@@ -44,6 +44,7 @@ require 'json'
 require 'etc'
 
 require_relative 'lib/runner'
+require_relative 'lib/assertions'
 
 ME=File.basename($0, ".rb")
 MD=File.dirname(File.expand_path($0))
@@ -85,6 +86,7 @@ $opts = {
 	:uid=>%x/id -u/.strip,
 	:vendor => ENV["SYNC_MTP_VENDOR"]||"",
 	:product => ENV["SYNC_MTP_PRODUCT"]||"",
+	:serial => nil,
 	:src => "",
 	:dst => ENV["SYNC_MTP_BACKUP"]||DST,
 	:dirs => [],
@@ -99,7 +101,9 @@ $opts = {
 	:yes => false,
 	:print => false,
 	:config => nil,
+	:detect => true,
 	:log => nil,
+	:logger => $log,
 	:delete_skipped_to => false,
 	:link => nil,
 	:now => Time.now.strftime("%Y%m%d")
@@ -142,7 +146,41 @@ def parse_lsusb(line)
 	return h
 end
 
+def getDeviceFile(dir, name, val=nil)
+	filepath = File.join(dir, name)
+	if File.exist?(filepath)
+		fileval = File.read(filepath).strip
+		return fileval if val.nil? || val.eql?(fileval)
+	end
+	return nil
+end
+
+def findDevice(vend, prod, serial)
+	s="/sys/bus/usb/devices/usb*/"
+	Dir.glob(s).each { |usbdir|
+		$log.debug "Searching #{usbdir} for serial: #{vend}:#{prod}:#{serial}"
+		Find.find(usbdir) { |dir|
+			next unless File.directory?(dir)
+
+			next if getDeviceFile(dir, "idProduct", prod).nil?
+			next if getDeviceFile(dir, "idVendor",  vend).nil?
+			next if getDeviceFile(dir, "serial", serial).nil?
+
+			return {
+				:dir => dir,
+				:idProduct => prod,
+				:idVendor  => vend,
+				:serial  => serial,
+				:manufacturer => getDeviceFile(dir, "manufacturer"),
+				:product => getDeviceFile(dir, "product")
+			}
+		}
+	}
+	return nil
+end
+
 def detect(gopts, jcfg)
+	return gopts unless gopts[:detect]
 	return gopts unless gopts[:vendor].empty?
 
 	$log.info "Detecting usb devices"
@@ -163,14 +201,25 @@ def detect(gopts, jcfg)
 		vend=h[:vendor]
 		prod=h[:product]
 		desc=h[:desc]
-		vendor="#{vend}:#{prod}"
-		configs.each_pair { |name,cfg|
+		vend_prod="#{vend}:#{prod}"
+		configs.each_pair { |name, cfg|
+
+			Assertions::not_nil?(cfg[:serial])
+
 			v=cfg[:vendor]
-			if v.eql?(vendor)
-				$log.info "Detected #{vend}:#{prod}: [#{desc}] [#{name}]"
-				gopts[:vendor]=vend
-				gopts[:product]=prod
-				return gopts
+			p=cfg[:product]
+			if v.eql?(vend_prod) || (v.eql?(vend) && p.eql?(prod))
+				hdev = findDevice(vend, prod, cfg[:serial])
+				if !hdev.nil? && cfg[:serial].eql?(hdev[:serial])
+					$log.info "Detected #{vend}:#{prod}:#{hdev[:serial]} [#{desc}] [#{hdev[:manufacturer]}/#{hdev[:product]}]"
+					$log.info hdev[:dir]
+					$log.info "Config=#{name}"
+					gopts[:vendor]=vend
+					gopts[:product]=prod
+					gopts[:serial]=hdev[:serial]
+					fillConfig(gopts, jcfg, name)
+					return gopts
+				end
 			end
 		}
 	}
@@ -183,8 +232,10 @@ def get_mtp_directory(gopts, jcfg)
 
 	uid=gopts[:uid]
 	dev="#{gopts[:vendor]}"
-	dev+=":#{gopts[:product]}" unless gopts[:product].empty?
-	$log.info "lsusb -d #{dev}"
+	if gopts[:vendor][/:/].nil?
+		dev+=":#{gopts[:product]}" unless gopts[:product].empty?
+	end
+
 	out=Runner.run("lsusb -d #{dev}", {:errmsg=>"Failed to list usb device #{dev}", :trim=>true, :fail=>false})
 	return nil if out.nil? || out.empty?
 
@@ -223,7 +274,38 @@ def get_dirs(src)
 	dirs
 end
 
-def parse(gopts, jcfg)
+def fillConfig(gopts, jcfg, name)
+	name=name.to_sym
+	config=jcfg[:configs][name]
+
+	$log.die "Unknown config name #{name}" if config.nil?
+	$log.info "Setting config values for #{name}"
+
+	gopts[:config] = config
+
+	config.keys.each { |key|
+		if key.eql?(:scripts)
+			# $opts[scripts]={:woot=>["rsync -av DCIM/ /data/photos/steeve/nexus_5/DCIM/"]}
+			# look for scripts for this host
+			hostname=%x(hostname -s).strip
+			user_hostname="#{Etc.getlogin}@#{hostname}".to_sym
+			$log.debug "user@host=#{user_hostname} config=#{config[key].inspect}"
+			if config[key].key?(user_hostname)
+				$log.debug config[key][user_hostname].inspect
+				gopts[:scripts]=config[key][user_hostname]
+			end
+		elsif gopts.key?(key)
+			gopts[key]=config[key]
+		else
+			# Invalid config key if it is not found in gopts (aka $opts)
+			$log.die "Unknown config key #{key}" unless gopts.key?(key)
+		end
+		$log.info "gopts[#{key}]=#{config[key]}"
+	}
+
+end
+
+def parseOptions(gopts, jcfg)
 	begin
 		config_names=jcfg[:configs].keys
 		mtp_dir=get_mtp_directory(gopts, jcfg)||"device not detected"
@@ -231,31 +313,11 @@ def parse(gopts, jcfg)
 			opts.banner = "#{ME}.rb [options]\n"
 
 			opts.on('-c', '--config NAME', String, "Config name, one of [#{config_names.join(',')}]") { |name|
-				name=name.to_sym
-				config=jcfg[:configs][name]
-				$log.die "Unknown config name #{name}" if config.nil?
-				$log.info "Setting config values for #{name}"
+				fillConfig(gopts, jcfg, name)
+			}
 
-				gopts[:config] = config
-
-				config.keys.each { |key|
-					if key.eql?(:scripts)
-						# $opts[scripts]={:woot=>["rsync -av DCIM/ /data/photos/steeve/nexus_5/DCIM/"]}
-						# look for scripts for this host
-						hostname=%x(hostname -s).strip
-						user_hostname="#{Etc.getlogin}@#{hostname}".to_sym
-						$log.debug "user@host=#{user_hostname} config=#{config[key].inspect}"
-						if config[key].key?(user_hostname)
-							$log.debug config[key][user_hostname].inspect
-							gopts[:scripts]=config[key][user_hostname]
-						end
-					else
-						# Invalid config key if it is not found in gopts (aka $opts)
-						$log.die "Unknown config key #{key}" unless gopts.key?(key)
-						gopts[key]=config[key]
-					end
-					$log.info "gopts[#{key}]=#{config[key]}"
-				}
+			opts.on('--[no-]detect', "Automatic device detection") { |detect|
+				gopts[:detect]=detect
 			}
 
 			opts.on('-b', '--backup DIR', String, "Backup directory, default #{gopts[:dst]}") { |dst|
@@ -433,7 +495,9 @@ HELP
 end
 
 $cfg = parseConfig(readConfig())
-$opts=parse($opts, $cfg)
+$opts= parseOptions($opts, $cfg)
+
+Runner.init($opts)
 
 def sync_blocks(fsrc, fdst, fsize, length, opts)
 	offset=0
@@ -644,6 +708,7 @@ def sync_src_dst(sdir, ddir, record=nil, opts)
 			end
 		} unless opts[:dryrun]
 		if opts[:run_scripts]
+			$log.debug "scripts="+opts[:scripts].inspect
 			opts[:scripts].each { |script|
 				script.gsub!('%DST%', opts[:dst])
 				Runner.run(script, opts)
