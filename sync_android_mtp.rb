@@ -661,16 +661,30 @@ def sync_dir(dest, dname, opts)
 	FileUtils.mkdir_p(ddir)
 end
 
+RE_ANDROID_TOPLEVEL=/^Android(\/.*|$)/
 RE_ANDROID_DATA_CACHE=/^Android\/data\/.*?\/cache\//i
 RE_THUMBNAILS=/(^|\/).thumbnails\//i
 RE_SKIP_ARRAY = [ RE_ANDROID_DATA_CACHE, RE_THUMBNAILS ]
+def skip_Android(path, opts)
+	m=RE_ANDROID_TOPLEVEL.match(path)
+	return false if m.nil?
+	$log.info "Skipping system dir: #{path}" if m[1].empty?
+	true
+end
+
 def skip_path(path, opts)
 	skip=false
 	# /^Android\/data\/.*\/cache\//i
 	RE_SKIP_ARRAY.each { |re|
 		m=re.match(path)
 		next if m.nil?
-		$log.debug "Skipping path #{path}: #{re.to_s}" if opts[:verbose]
+		if opts[:verbose]
+			if File.directory?(path)
+				$log.debug "Skipping directory #{path}: #{re.to_s}"
+			else
+				$log.debug "Skipping path #{path}: #{re.to_s}"
+			end
+		end
 		skip=true
 		break
 	}
@@ -690,6 +704,7 @@ def sync_src_dst(sdir, ddir, record=nil, opts)
 			# strip off ./
 			e=e[2..-1]
 			next if e.nil?
+			next if skip_Android(e, opts)
 			skip=skip_path(e, opts)
 			if File.directory?(e)
 				next if skip
@@ -707,13 +722,6 @@ def sync_src_dst(sdir, ddir, record=nil, opts)
 				$log.warn "Skipping file #{e}: #{File.lstat(e).inspect}"
 			end
 		} unless opts[:dryrun]
-		if opts[:run_scripts]
-			$log.debug "scripts="+opts[:scripts].inspect
-			opts[:scripts].each { |script|
-				script.gsub!('%DST%', opts[:dst])
-				Runner.run(script, opts)
-			}
-		end
 	}
 	tend=Time.new.to_i-tstart
 	tend+=1 if tend==0
@@ -722,6 +730,7 @@ def sync_src_dst(sdir, ddir, record=nil, opts)
 end
 
 def sync_toplevel(toplevel, opts)
+	# toplevel is something like: Internal shared storage/foo
 	$log.info "toplevel="+toplevel
 	$log.info "src="+opts[:src]
 	$log.info "dst="+opts[:dst]
@@ -756,11 +765,37 @@ def sync_toplevel(toplevel, opts)
 	end
 end
 
+def glob_toplevel(toplevel, opts)
+	dirs=[]
+	FileUtils.chdir(File.join(opts[:src], toplevel)) {
+		Dir.glob("*") { |dir|
+			next unless File.directory?(dir)
+			next if skip_Android(dir, opts)
+			dir = File.join(toplevel, dir)
+			$log.info "Found directory #{dir}"
+			dirs << dir
+		}
+	}
+	dirs
+end
+
 begin
 	$log.die "No dirs found in #{$opts[:src]}" if $opts[:dirs].empty?
 	$opts[:dirs].each { |toplevel|
-		sync_toplevel(toplevel, $opts)
+		#sync_toplevel(toplevel, $opts)
+		dirs=glob_toplevel(toplevel, $opts)
+		dirs.each { |dir|
+			# dir like Internal shared storage/Music
+			sync_toplevel(dir, $opts)
+		}
 	}
+	if $opts[:run_scripts]
+		$log.debug "scripts="+$opts[:scripts].inspect
+		$opts[:scripts].each { |script|
+			script.gsub!('%DST%', $opts[:dst])
+			Runner.run(script, $opts)
+		}
+	end
 rescue Errno::EIO => e
 	$log.die "Quitting on IO error: #{e.message}"
 rescue Errno::ENOENT => e
