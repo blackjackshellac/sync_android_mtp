@@ -106,6 +106,7 @@ $opts = {
 	:logger => $log,
 	:delete_skipped_to => false,
 	:link => nil,
+	:skip_toplevel => %w/Android/,
 	:now => Time.now.strftime("%Y%m%d")
 }
 
@@ -353,6 +354,11 @@ def parseOptions(gopts, jcfg)
 				gopts[:progress]=true
 			}
 
+			opts.on('-x', '--skip-toplevel DIR', String, "Skip the given top levels dir") { |skip|
+				gopts[:skip_toplevel] << skip
+				gopts[:skip_toplevel].uniq!
+			}
+
 			opts.on('-V', '--vendor VENDOR', String, "Vendor code default=#{gopts[:vendor]}") { |vendor|
 				gopts[:vendor]=vendor
 			}
@@ -478,6 +484,15 @@ HELP
 			perms[:gid]=gid
 			gopts[:perms]=perms
 
+		end
+
+		if gopts[:skip_toplevel].empty?
+			$re_skip_toplevel=nil
+		else
+			# RE_ANDROID_TOPLEVEL=/^Android(\/.*|$)/
+			dirs=gopts[:skip_toplevel].join("|")
+			#rs=%r/(#{x.join("|")})(\/)?(.*)?/
+			$re_skip_toplevel=%r/(#{dirs})\/?(.*|$)/
 		end
 
 		vputs "gopts=#{gopts.inspect}"
@@ -661,14 +676,23 @@ def sync_dir(dest, dname, opts)
 	FileUtils.mkdir_p(ddir)
 end
 
-RE_ANDROID_TOPLEVEL=/^Android(\/.*|$)/
 RE_ANDROID_DATA_CACHE=/^Android\/data\/.*?\/cache\//i
 RE_THUMBNAILS=/(^|\/).thumbnails\//i
 RE_SKIP_ARRAY = [ RE_ANDROID_DATA_CACHE, RE_THUMBNAILS ]
 def skip_Android(path, opts)
-	m=RE_ANDROID_TOPLEVEL.match(path)
+
+	# no skips
+	return false if $re_skip_toplevel.nil?
+
+	# eg. (Android|Music)\/?(.*|$)
+	m=$re_skip_toplevel.match(path)
 	return false if m.nil?
-	$log.info "Skipping system dir: #{path}" if m[1].empty?
+	#
+	# Android                 - m1,m2 = Android,""
+	# Android/                - m1,m2 = Android,""
+	# Android/some/other/shit - m1,m2 = Android,some/other/shit
+	#
+	$log.info "Skipping #{m[1]}: #{path}" if m[2].empty?
 	true
 end
 
