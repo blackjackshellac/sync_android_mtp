@@ -1,5 +1,16 @@
 {
 	"configs": {
+		"etienne": {
+			"vendor": "18d1:4ee1",
+			"serial": "03dc86af215c7d90",
+			"dst": "/home/tmp/etienne/nexus_5/backup/",
+			"link": "/home/tmp/etienne/nexus_5/links",
+			"perms": {
+				"owner": "steeve:snl",
+				"mode": "0664"
+			}
+		},
+
 		"lissa": {
 			"vendor": "18d1:4ee1",
 			"serial": "",
@@ -13,6 +24,20 @@
 				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal\ storage/DCIM/\" /data/photos/lissa/nexus_5/DCIM/" ]
 			}
 		},
+		"lissa_debug": {
+			"vendor": "18d1:4ee2",
+			"serial": "",
+			"dst": "/home/tmp/lissa/nexus_5/backup/",
+			"link": "/home/tmp/lissa/nexus_5/links",
+			"perms": {
+				"owner": "steeve:snl",
+				"mode": "0664"
+			},
+			"scripts": {
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal\ storage/DCIM/\" /data/photos/lissa/nexus_5/DCIM/" ]
+			}
+		},
+
 		"steeve": {
 			"vendor": "18d1:4ee1",
 			"serial": "01e75e120bd1b627",
