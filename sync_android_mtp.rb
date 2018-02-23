@@ -253,7 +253,8 @@ def get_mtp_directory(gopts, jcfg)
 	#gvfs-mount "mtp://[usb:#{h[:bus]},#{h[:dev]}]/"
 	unless File.directory?(mtp_dir)
 		$log.info "Mounting mtp dir #{mtp_dir}" 
-		out=Runner.run(%Q[gvfs-mount 'mtp://[usb:#{h[:bus]},#{h[:dev]}]/'], {:fail=>false})
+		cmd=%Q[gvfs-mount 'mtp://[usb:#{h[:bus]},#{h[:dev]}]/']
+		out=Runner.run(cmd, {:fail=>false})
 		puts out unless out.empty?
 	end
 
