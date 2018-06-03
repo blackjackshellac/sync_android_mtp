@@ -10,7 +10,19 @@
 				"mode": "0664"
 			}
 		},
-
+		"note4": {
+			"vendor": "2717:ff40",
+			"serial": "1ecee0870504",
+			"dst": "/home/tmp/lissa/note4/backup/",
+			"link": "/home/tmp/lissa/note4/links",
+			"perms": {
+				"owner": "steeve:snl",
+				"mode": "0664"
+			},
+			"scripts": {
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal\ shared\ storage/DCIM/\" /data/photos/lissa/note4/DCIM/" ]
+			}
+		},
 		"lissa": {
 			"vendor": "18d1:4ee1",
 			"serial": "04c8dd270a65b71f",

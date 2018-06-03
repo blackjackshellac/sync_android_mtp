@@ -80,7 +80,7 @@ def set_logger(stream, level=Logger::INFO)
 	log
 end
 
-$log=set_logger(STDERR)
+$log=set_logger(STDERR, Logger::INFO)
 
 $opts = {
 	:uid=>%x/id -u/.strip,
@@ -139,8 +139,11 @@ end
 
 def parse_lsusb(line)
 	h=nil
-	m=line.match(/Bus\s(?<bus>[\d]{3})\sDevice\s(?<dev>[\d]{3}):\sID\s(?<vendor>[\w]{4}):(?<product>[\w]{4})\s(?<desc>.*)/)
+	# missing product description
+	# Bus 003 Device 017: ID 2717:ff40
+	m=line.match(/Bus\s(?<bus>[\d]{3})\sDevice\s(?<dev>[\d]{3}):\sID\s(?<vendor>[\w]{4}):(?<product>[\w]{4})\s?(?<desc>.*)?/)
 	unless m.nil?
+		#$log.debug m.inspect
 		h={}
 		m.names.each { |key| h[key.to_sym] = m[key] }
 	end
@@ -194,6 +197,7 @@ def detect(gopts, jcfg)
 
 	out.split(/\n/).each { |line|
 		line.strip!
+		#puts line
 		#next if line[/Bus\s([\d]{3})\sDevice\s([\d]{3}):\sID\s([\w]{4}):([\w]{4})\s(.*)/].nil?
 		h=parse_lsusb(line)
 		next if h.nil?
@@ -201,7 +205,7 @@ def detect(gopts, jcfg)
 		dev=h[:dev]
 		vend=h[:vendor]
 		prod=h[:product]
-		desc=h[:desc]
+		desc=h[:desc]||"unknown"
 		vend_prod="#{vend}:#{prod}"
 		configs.each_pair { |name, cfg|
 
