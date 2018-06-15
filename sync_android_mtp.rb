@@ -322,6 +322,13 @@ def parseOptions(gopts, jcfg)
 				fillConfig(gopts, jcfg, name)
 			}
 
+			opts.on('-C', '--common', "Common options (-f -p -v -R)") {
+				gopts[:from]=true
+				gopts[:progress]=true
+				gopts[:verbose]=true
+				gopts[:run_scripts]=true
+			}
+
 			opts.on('--[no-]detect', "Automatic device detection") { |detect|
 				gopts[:detect]=detect
 			}
