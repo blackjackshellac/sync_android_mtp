@@ -366,8 +366,8 @@ def parseOptions(gopts, jcfg)
 				gopts[:progress]=true
 			}
 
-			opts.on('-x', '--skip-toplevel DIR', String, "Skip the given top levels dir") { |skip|
-				gopts[:skip_toplevel] << skip
+			opts.on('-x', '--skip-toplevel DIR', Array, "Skip the given top level dirs") { |skip|
+				gopts[:skip_toplevel].concat(skip)
 				gopts[:skip_toplevel].uniq!
 			}
 
