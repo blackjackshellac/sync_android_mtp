@@ -166,6 +166,10 @@ def findDevice(vend, prod, serial)
 		Find.find(usbdir) { |dir|
 			next unless File.directory?(dir)
 
+			#iManufacturer           1 LGE
+			#iProduct                2 Nexus 5X
+			#iSerial                 3 01e75e120bd1b627
+
 			next if getDeviceFile(dir, "idProduct", prod).nil?
 			next if getDeviceFile(dir, "idVendor",  vend).nil?
 			next if getDeviceFile(dir, "serial", serial).nil?
@@ -201,6 +205,10 @@ def detect(gopts, jcfg)
 		#next if line[/Bus\s([\d]{3})\sDevice\s([\d]{3}):\sID\s([\w]{4}):([\w]{4})\s(.*)/].nil?
 		h=parse_lsusb(line)
 		next if h.nil?
+		#iManufacturer           1 LGE
+		#iProduct                2 Nexus 5X
+		#iSerial                 3 01e75e120bd1b627
+
 		bus=h[:bus]
 		dev=h[:dev]
 		vend=h[:vendor]
@@ -219,8 +227,10 @@ def detect(gopts, jcfg)
 					$log.info "Detected #{vend}:#{prod}:#{hdev[:serial]} [#{desc}] [#{hdev[:manufacturer]}/#{hdev[:product]}]"
 					$log.info hdev[:dir]
 					$log.info "Config=#{name}"
+					gopts[:manufacturer]=hdev[:manufacturer]
 					gopts[:vendor]=vend
 					gopts[:product]=prod
+					gopts[:iproduct]=hdev[:product]
 					gopts[:serial]=hdev[:serial]
 					fillConfig(gopts, jcfg, name)
 					return gopts
@@ -251,7 +261,11 @@ def get_mtp_directory(gopts, jcfg)
 
 	rtdir="/run/user/#{uid}/"
 	$log.die "Runtime dir not found #{rtdir}" unless File.directory?(rtdir)
-	mtp_dir=File.join(rtdir, "gvfs/mtp:host=%5Busb%3A#{h[:bus]}%2C#{h[:dev]}%5D/")
+	# /run/user/1201/gvfs/mtp\:host\=LGE_Nexus_5X_01e75e120bd1b627/
+	mtp_host="gvfs/mtp:host=%s %s %s" % [ gopts[:manufacturer], gopts[:iproduct], gopts[:serial] ]
+	mtp_host.gsub!(/ /, "_")
+	#mtp_dir=File.join(rtdir, "gvfs/mtp:host=%5Busb%3A#{h[:bus]}%2C#{h[:dev]}%5D/")
+	mtp_dir=File.join(rtdir, mtp_host)
 
 	#gvfs-mount "mtp://[usb:003,003]/"
 	#gvfs-mount "mtp://[usb:#{h[:bus]},#{h[:dev]}]/"
