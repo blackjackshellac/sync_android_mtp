@@ -20,7 +20,7 @@
 				"mode": "0664"
 			},
 			"scripts": {
-				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal\ shared\ storage/DCIM/\" /data/photos/lissa/note4/DCIM/" ]
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/%SRC%/DCIM/\" /data/photos/lissa/note4/DCIM/" ]
 			}
 		},
 		"lissa": {
@@ -33,7 +33,7 @@
 				"mode": "0664"
 			},
 			"scripts": {
-				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal\ storage/DCIM/\" /data/photos/lissa/nexus_5/DCIM/" ]
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal storage/DCIM/\" /data/photos/lissa/nexus_5/DCIM/" ]
 			}
 		},
 		"lissa_debug": {
@@ -46,10 +46,23 @@
 				"mode": "0664"
 			},
 			"scripts": {
-				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal\ storage/DCIM/\" /data/photos/lissa/nexus_5/DCIM/" ]
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal storage/DCIM/\" /data/photos/lissa/nexus_5/DCIM/" ]
 			}
 		},
-
+		"motog7": {
+			"vendor": "22b8:2e82",
+			"serial": "ZY226TDKDH",
+			"dst":  "/home/tmp/steeve/motog7/backup/",
+			"link": "/home/tmp/steeve/motog7/links",
+			"perms": {
+				"owner": "steeve",
+				"group": "snl",
+				"mode": "0644"
+			},
+			"scripts": {
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/%SRC%/DCIM/\" /data/photos/steeve/motog7/DCIM/" ]
+			}
+		},
 		"steeve": {
 			"vendor": "18d1:4ee1",
 			"serial": "01e75e120bd1b627",
@@ -58,10 +71,10 @@
 			"perms": {
 				"owner": "steeve",
 				"group": "snl",
-				"mode": "0640"
+				"mode": "0644"
 			},
 			"scripts": {
-				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal shared storage/DCIM/\" /data/photos/steeve/nexus_5/DCIM/" ]
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/%SRC%/DCIM/\" /data/photos/steeve/nexus_5/DCIM/" ]
 			}
 		},
 		"steeve_debug": {
@@ -72,10 +85,10 @@
 			"perms": {
 				"owner": "steeve",
 				"group": "snl",
-				"mode": "0640"
+				"mode": "0644"
 			},
 			"scripts": {
-				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/Internal shared storage/DCIM/\" /data/photos/steeve/nexus_5/DCIM/" ]
+				"steeve@woot": [ "rsync -av --exclude .thumbnails/ \"%DST%/%SRC%/DCIM/\" /data/photos/steeve/nexus_5/DCIM/" ]
 			}
 		},
 		"nexus_7": {

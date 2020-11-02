@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+scriptdirscriptdirscriptdir#!/usr/bin/env ruby
 #
 #find_path_by_usbid () {
 #	id="$1"
@@ -174,13 +174,16 @@ def findDevice(vend, prod, serial)
 			next if getDeviceFile(dir, "idVendor",  vend).nil?
 			next if getDeviceFile(dir, "serial", serial).nil?
 
+			product=getDeviceFile(dir, "product")
+			product.gsub!(/[()]/, "_") unless prod.nil?
+
 			return {
 				:dir => dir,
 				:idProduct => prod,
 				:idVendor  => vend,
 				:serial  => serial,
 				:manufacturer => getDeviceFile(dir, "manufacturer"),
-				:product => getDeviceFile(dir, "product")
+				:product => product
 			}
 		}
 	}
@@ -270,7 +273,7 @@ def get_mtp_directory(gopts, jcfg)
 	#gvfs-mount "mtp://[usb:003,003]/"
 	#gvfs-mount "mtp://[usb:#{h[:bus]},#{h[:dev]}]/"
 	unless File.directory?(mtp_dir)
-		$log.info "Mounting mtp dir #{mtp_dir}" 
+		$log.info "Mounting mtp dir #{mtp_dir}"
 		cmd=%Q[gvfs-mount 'mtp://[usb:#{h[:bus]},#{h[:dev]}]/']
 		out=Runner.run(cmd, {:fail=>false})
 		puts out unless out.empty?
@@ -843,7 +846,11 @@ begin
 		$log.debug "scripts="+$opts[:scripts].inspect
 		$opts[:scripts].each { |script|
 			script.gsub!('%DST%', $opts[:dst])
-			Runner.run(script, $opts)
+			$opts[:dirs].each { |dir|
+				scriptdir=script.gsub(/%SRC%/, dir)
+				$log.info "running script with src=#{dir}: #{scriptdir}"
+				Runner.run(scriptdir, $opts)
+			}
 		}
 	end
 rescue Errno::EIO => e
@@ -858,4 +865,3 @@ rescue => e
 	}
 	$log.die "Exception: " + e.message
 end
-
