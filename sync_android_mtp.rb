@@ -1,4 +1,4 @@
-scriptdirscriptdirscriptdir#!/usr/bin/env ruby
+#!/usr/bin/env ruby
 #
 #find_path_by_usbid () {
 #	id="$1"
